@@ -1,0 +1,44 @@
+{
+  "name": "context-handoff",
+  "version": "0.1.0",
+  "description": "Past a context threshold, records a hand-off, clears the context, and continues from the notes in a fresh conversation",
+  "author": { "name": "ulttla" },
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Automatic hand-off",
+      "description": "Hand off on its own once the context window passes the threshold. Off, /handoff-now still works.",
+      "default": true
+    },
+    "threshold": {
+      "type": "number",
+      "title": "Threshold (%)",
+      "description": "How full the context window is, in percent, before the hand-off starts. Checked after each turn.",
+      "default": 40
+    },
+    "retriggerStep": {
+      "type": "number",
+      "title": "Retry step (%)",
+      "description": "After an interrupted or failed hand-off, try again once the context has grown this many points.",
+      "default": 5
+    },
+    "closeCommand": {
+      "type": "string",
+      "title": "Project close skill",
+      "description": "A slash command or skill of the project that records the hand-off, run when the project has it. Otherwise a built-in prompt records PROGRESS.md or HANDOFF.md.",
+      "default": "session-close"
+    },
+    "closePrompt": {
+      "type": "string",
+      "title": "Hand-off prompt",
+      "description": "Replaces the built-in hand-off prompt and the close skill. {percent} and {threshold} are filled in.",
+      "default": ""
+    },
+    "resumePrompt": {
+      "type": "string",
+      "title": "Resume prompt",
+      "description": "Replaces the built-in prompt submitted after the clear.",
+      "default": ""
+    }
+  }
+}

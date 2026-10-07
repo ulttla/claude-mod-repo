@@ -1,0 +1,4 @@
+{
+  "description": "The context-handoff hooks module",
+  "modules": ["./register.js"]
+}

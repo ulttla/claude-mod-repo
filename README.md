@@ -8,12 +8,13 @@ Small [mods](https://code.claude.com/docs/en/plugins/mods/overview) for Claude C
 
 ## English
 
-A mod is a plugin that changes how Claude Code looks and behaves. This repository holds two, and works as a plugin marketplace, so you can install either one by name.
+A mod is a plugin that changes how Claude Code looks and behaves. This repository holds three, and works as a plugin marketplace, so you can install any of them by name.
 
 | Mod | What it does | Where it works |
 | :- | :- | :- |
 | [`context-meter`](context-meter) | Shows the git branch, how full the context window is, how much the last turn added, and how much of your plan limits you have used, in a band above the prompt | Terminal and the Desktop app's Code tab |
 | [`auto-pin`](auto-pin) | Pins a new session in the sidebar as soon as it starts | The Desktop app's Code tab |
+| [`context-handoff`](context-handoff) | Once the context window is 40% full, has Claude write hand-off notes, clears the context, and continues from the notes in a fresh conversation | The Desktop app's Code tab |
 
 ### Requirements
 
@@ -36,6 +37,10 @@ claude plugin install context-meter@claude-mod-repo
 
 ```bash
 claude plugin install auto-pin@claude-mod-repo
+```
+
+```bash
+claude plugin install context-handoff@claude-mod-repo
 ```
 
 In a Claude Code session the same commands are `/plugin marketplace add ulttla/claude-mod-repo` and `/plugin install context-meter@claude-mod-repo`.
@@ -117,6 +122,39 @@ When you start a new session in the Desktop app's Code tab, the mod pins it in t
 - Outside the Desktop app there is no sidebar, and the mod does nothing.
 - Sessions the app starts on its own, such as scheduled tasks, may be pinned too.
 
+### context-handoff
+
+A long session gets worse as its context fills up. This mod hands the work over to a fresh conversation before that happens, without you opening a new session.
+
+After each turn it reads how full the context window is. Past the threshold (40% by default), it:
+
+1. Submits a prompt that has Claude record a hand-off. When the project has a `session-close` skill, Claude is told to run it; otherwise Claude follows the session-close procedure in the project's `CLAUDE.md`, or updates `PROGRESS.md`, or writes `HANDOFF.md` at the project root.
+2. When that turn ends, asks the Desktop app to clear the conversation (the same as `/clear`). The session keeps its row in the sidebar, and the old conversation stays available under **Resume previous session**.
+3. In the fresh conversation, submits a prompt that has Claude read the notes and continue from the recorded next step.
+
+Each step shows a toast. A message you had already queued runs first; if one runs after the clear was asked for, the notes are recorded again so nothing is lost. If you interrupt the hand-off turn, or the app refuses the clear, the mod gives up, says why, and tries again once the context has grown by another 5 points.
+
+- `/handoff-now` hands off right away, at any context size.
+- Outside the Desktop app there is no app to clear the conversation, so the mod records the notes and then reports that it could not clear.
+- The prompts the mod submits are shown in the transcript, marked `[context-handoff]`.
+
+#### Options
+
+| Option | Default | What it does |
+| :- | :- | :- |
+| `enabled` | on | Hand off on its own past the threshold. Off, only `/handoff-now` hands off |
+| `threshold` | 40 | How full the context window is, in percent, before the hand-off starts |
+| `retriggerStep` | 5 | After an interrupted or failed hand-off, try again once the context has grown this many points |
+| `closeCommand` | `session-close` | The project skill Claude is told to run to record the hand-off, when the project has it |
+| `closePrompt` | empty | Replaces the built-in hand-off prompt and the close skill. `{percent}` and `{threshold}` are filled in |
+| `resumePrompt` | empty | Replaces the built-in prompt submitted after the clear |
+
+To change them in a terminal session, run `/plugin configure context-handoff@claude-mod-repo`, or pass them when you install:
+
+```bash
+claude plugin install context-handoff@claude-mod-repo --config threshold=50
+```
+
 ### Uninstall
 
 ```bash
@@ -127,6 +165,10 @@ claude plugin uninstall context-meter@claude-mod-repo
 claude plugin uninstall auto-pin@claude-mod-repo
 ```
 
+```bash
+claude plugin uninstall context-handoff@claude-mod-repo
+```
+
 ### License
 
 [MIT](LICENSE). Shared as is, without support.
@@ -135,12 +177,13 @@ claude plugin uninstall auto-pin@claude-mod-repo
 
 ## 한국어
 
-mod는 Claude Code의 모양과 동작을 바꾸는 플러그인입니다. 이 리포에는 mod 두 개가 들어 있고, 리포 자체가 플러그인 마켓플레이스 역할을 하므로 이름으로 골라 설치할 수 있습니다.
+mod는 Claude Code의 모양과 동작을 바꾸는 플러그인입니다. 이 리포에는 mod 세 개가 들어 있고, 리포 자체가 플러그인 마켓플레이스 역할을 하므로 이름으로 골라 설치할 수 있습니다.
 
 | Mod | 하는 일 | 동작하는 곳 |
 | :- | :- | :- |
 | [`context-meter`](context-meter) | git 브랜치, 컨텍스트 창이 얼마나 찼는지, 직전 턴이 얼마나 늘렸는지, 플랜 한도를 얼마나 썼는지를 입력창 위 한 줄로 표시 | 터미널, 데스크톱 앱 Code 탭 |
 | [`auto-pin`](auto-pin) | 새 세션이 시작되면 사이드바에 바로 고정 | 데스크톱 앱 Code 탭 |
+| [`context-handoff`](context-handoff) | 컨텍스트 창이 40% 차면 Claude가 인계 기록을 쓰게 하고, 컨텍스트를 비운 뒤, 새 대화에서 기록을 읽어 이어감 | 데스크톱 앱 Code 탭 |
 
 ### 요구 사항
 
@@ -163,6 +206,10 @@ claude plugin install context-meter@claude-mod-repo
 
 ```bash
 claude plugin install auto-pin@claude-mod-repo
+```
+
+```bash
+claude plugin install context-handoff@claude-mod-repo
 ```
 
 Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/claude-mod-repo`, `/plugin install context-meter@claude-mod-repo`로 입력합니다.
@@ -244,6 +291,39 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 - 데스크톱 앱 밖에는 사이드바가 없으므로 아무 일도 하지 않습니다.
 - 예약 작업처럼 앱이 스스로 시작하는 세션도 고정될 수 있습니다.
 
+### context-handoff
+
+긴 세션은 컨텍스트가 찰수록 품질이 떨어집니다. 이 mod는 그 전에 작업을 새 대화로 넘깁니다. 새 세션을 직접 열 필요가 없습니다.
+
+턴이 끝날 때마다 컨텍스트 창이 얼마나 찼는지 읽고, 임계값(기본 40%)을 넘으면 다음을 차례로 합니다.
+
+1. Claude가 인계 기록을 쓰도록 프롬프트를 제출합니다. 프로젝트에 `session-close` 스킬이 있으면 그 스킬을 실행하라고 지시하고, 없으면 프로젝트 `CLAUDE.md`의 세션 종료 절차를 따르거나, `PROGRESS.md`를 갱신하거나, 프로젝트 루트에 `HANDOFF.md`를 씁니다.
+2. 그 턴이 끝나면 데스크톱 앱에 대화를 비우라고 요청합니다(`/clear`와 같음). 세션은 사이드바의 같은 행에 남고, 이전 대화는 **Resume previous session**으로 되돌릴 수 있습니다.
+3. 새 대화에서 Claude가 기록을 읽고 기록된 다음 시작점부터 이어가도록 프롬프트를 제출합니다.
+
+단계마다 토스트로 알립니다. 이미 대기 중이던 메시지가 있으면 그것이 먼저 실행되고, 비우기 요청 뒤에 턴이 실행되면 기록을 다시 써서 빠지는 내용이 없게 합니다. 인계 턴을 중단하거나 앱이 비우기를 거부하면 포기하고 이유를 알린 뒤, 컨텍스트가 5포인트 더 차면 다시 시도합니다.
+
+- `/handoff-now`는 컨텍스트 크기와 상관없이 바로 인계합니다.
+- 데스크톱 앱 밖에는 대화를 비워 줄 앱이 없으므로, 기록만 쓴 뒤 비우지 못했다고 알립니다.
+- mod가 제출하는 프롬프트는 `[context-handoff]` 표시와 함께 대화에 보입니다.
+
+#### 옵션
+
+| 옵션 | 기본값 | 하는 일 |
+| :- | :- | :- |
+| `enabled` | 켜짐 | 임계값을 넘으면 자동으로 인계. 끄면 `/handoff-now`로만 인계 |
+| `threshold` | 40 | 인계를 시작하는 컨텍스트 창 사용률(%) |
+| `retriggerStep` | 5 | 중단되거나 실패한 인계를 컨텍스트가 몇 포인트 더 찼을 때 다시 시도할지 |
+| `closeCommand` | `session-close` | 프로젝트에 있을 때 인계 기록용으로 실행하라고 지시할 스킬 |
+| `closePrompt` | 비어 있음 | 내장 인계 프롬프트와 스킬 지시를 대체. `{percent}`, `{threshold}`가 채워짐 |
+| `resumePrompt` | 비어 있음 | 비운 뒤 제출하는 내장 프롬프트를 대체 |
+
+터미널 세션에서는 `/plugin configure context-handoff@claude-mod-repo`로 바꾸거나, 설치할 때 넘깁니다.
+
+```bash
+claude plugin install context-handoff@claude-mod-repo --config threshold=50
+```
+
 ### 제거
 
 ```bash
@@ -252,6 +332,10 @@ claude plugin uninstall context-meter@claude-mod-repo
 
 ```bash
 claude plugin uninstall auto-pin@claude-mod-repo
+```
+
+```bash
+claude plugin uninstall context-handoff@claude-mod-repo
 ```
 
 ### 라이선스
