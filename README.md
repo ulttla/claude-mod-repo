@@ -1,4 +1,4 @@
-# claude-mode-repo
+# claude-mod-repo
 
 Small [mods](https://code.claude.com/docs/en/plugins/mods/overview) for Claude Code.
 
@@ -27,18 +27,18 @@ A mod is code that runs with your permissions: it can read and write your files,
 Add this repository as a marketplace, then install the mods you want:
 
 ```bash
-claude plugin marketplace add ulttla/claude-mode-repo
+claude plugin marketplace add ulttla/claude-mod-repo
 ```
 
 ```bash
-claude plugin install context-meter@claude-mode-repo
+claude plugin install context-meter@claude-mod-repo
 ```
 
 ```bash
-claude plugin install auto-pin@claude-mode-repo
+claude plugin install auto-pin@claude-mod-repo
 ```
 
-In a Claude Code session the same commands are `/plugin marketplace add ulttla/claude-mode-repo` and `/plugin install context-meter@claude-mode-repo`.
+In a Claude Code session the same commands are `/plugin marketplace add ulttla/claude-mod-repo` and `/plugin install context-meter@claude-mod-repo`.
 
 A mod loads the next time you start a session. In a session that is already open, run `/reload-plugins`.
 
@@ -47,11 +47,11 @@ A mod loads the next time you start a session. In a session that is already open
 Clone the repository and load a mod's folder for one terminal session:
 
 ```bash
-git clone https://github.com/ulttla/claude-mode-repo.git
+git clone https://github.com/ulttla/claude-mod-repo.git
 ```
 
 ```bash
-claude --plugin-dir ./claude-mode-repo/context-meter
+claude --plugin-dir ./claude-mod-repo/context-meter
 ```
 
 ### Check what a mod does first
@@ -59,7 +59,7 @@ claude --plugin-dir ./claude-mode-repo/context-meter
 With the repository cloned, this lists the events a mod handles and what it asks Claude Code to do, without running it:
 
 ```bash
-claude plugin validate ./claude-mode-repo/context-meter
+claude plugin validate ./claude-mod-repo/context-meter
 ```
 
 ### context-meter
@@ -95,11 +95,11 @@ When you start a new session in the Desktop app's Code tab, the mod pins it in t
 ### Uninstall
 
 ```bash
-claude plugin uninstall context-meter@claude-mode-repo
+claude plugin uninstall context-meter@claude-mod-repo
 ```
 
 ```bash
-claude plugin uninstall auto-pin@claude-mode-repo
+claude plugin uninstall auto-pin@claude-mod-repo
 ```
 
 ### License
@@ -129,18 +129,18 @@ mod는 사용자 권한으로 실행되는 코드입니다. 파일을 읽고 쓰
 이 리포를 마켓플레이스로 추가한 뒤 원하는 mod를 설치합니다.
 
 ```bash
-claude plugin marketplace add ulttla/claude-mode-repo
+claude plugin marketplace add ulttla/claude-mod-repo
 ```
 
 ```bash
-claude plugin install context-meter@claude-mode-repo
+claude plugin install context-meter@claude-mod-repo
 ```
 
 ```bash
-claude plugin install auto-pin@claude-mode-repo
+claude plugin install auto-pin@claude-mod-repo
 ```
 
-Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/claude-mode-repo`, `/plugin install context-meter@claude-mode-repo`로 입력합니다.
+Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/claude-mod-repo`, `/plugin install context-meter@claude-mod-repo`로 입력합니다.
 
 mod는 다음에 세션을 시작할 때 로드됩니다. 이미 열려 있는 세션에서는 `/reload-plugins`를 실행합니다.
 
@@ -149,11 +149,11 @@ mod는 다음에 세션을 시작할 때 로드됩니다. 이미 열려 있는 �
 리포를 클론한 뒤 터미널 세션 하나에만 mod 폴더를 로드합니다.
 
 ```bash
-git clone https://github.com/ulttla/claude-mode-repo.git
+git clone https://github.com/ulttla/claude-mod-repo.git
 ```
 
 ```bash
-claude --plugin-dir ./claude-mode-repo/context-meter
+claude --plugin-dir ./claude-mod-repo/context-meter
 ```
 
 ### mod가 하는 일 먼저 확인하기
@@ -161,7 +161,7 @@ claude --plugin-dir ./claude-mode-repo/context-meter
 리포를 클론한 상태에서 아래 명령을 실행하면, mod를 실행하지 않고 어떤 이벤트를 처리하고 Claude Code에 무엇을 요청하는지 나열합니다.
 
 ```bash
-claude plugin validate ./claude-mode-repo/context-meter
+claude plugin validate ./claude-mod-repo/context-meter
 ```
 
 ### context-meter
@@ -197,11 +197,11 @@ claude plugin validate ./claude-mode-repo/context-meter
 ### 제거
 
 ```bash
-claude plugin uninstall context-meter@claude-mode-repo
+claude plugin uninstall context-meter@claude-mod-repo
 ```
 
 ```bash
-claude plugin uninstall auto-pin@claude-mode-repo
+claude plugin uninstall auto-pin@claude-mod-repo
 ```
 
 ### 라이선스

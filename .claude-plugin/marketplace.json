@@ -1,5 +1,5 @@
 {
-  "name": "claude-mode-repo",
+  "name": "claude-mod-repo",
   "owner": { "name": "ulttla" },
   "metadata": {
     "description": "Small Claude Code mods: a context and plan-limit meter above the prompt, and auto-pin for new desktop sessions"
