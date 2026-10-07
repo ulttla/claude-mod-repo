@@ -1,0 +1,19 @@
+{
+  "name": "claude-mode-repo",
+  "owner": { "name": "ulttla" },
+  "metadata": {
+    "description": "Small Claude Code mods: a context and plan-limit meter above the prompt, and auto-pin for new desktop sessions"
+  },
+  "plugins": [
+    {
+      "name": "context-meter",
+      "source": "./context-meter",
+      "description": "Shows context window usage, what the last turn added, and plan limit usage above the prompt"
+    },
+    {
+      "name": "auto-pin",
+      "source": "./auto-pin",
+      "description": "Pins a new session in the desktop app's sidebar as it starts"
+    }
+  ]
+}

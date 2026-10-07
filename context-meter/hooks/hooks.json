@@ -1,0 +1,4 @@
+{
+  "description": "The context-meter hooks module",
+  "modules": ["./register.js"]
+}
