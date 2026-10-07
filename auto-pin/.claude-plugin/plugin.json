@@ -1,6 +1,6 @@
 {
   "name": "auto-pin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pins a new session in the desktop app's sidebar as it starts",
   "author": { "name": "ulttla" }
 }

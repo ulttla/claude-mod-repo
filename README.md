@@ -12,7 +12,7 @@ A mod is a plugin that changes how Claude Code looks and behaves. This repositor
 
 | Mod | What it does | Where it works |
 | :- | :- | :- |
-| [`context-meter`](context-meter) | Shows how full the context window is, how much the last turn added, and how much of your plan limits you have used, in a band above the prompt | Terminal and the Desktop app's Code tab |
+| [`context-meter`](context-meter) | Shows the git branch, how full the context window is, how much the last turn added, and how much of your plan limits you have used, in a band above the prompt | Terminal and the Desktop app's Code tab |
 | [`auto-pin`](auto-pin) | Pins a new session in the sidebar as soon as it starts | The Desktop app's Code tab |
 
 ### Requirements
@@ -67,21 +67,46 @@ claude plugin validate ./claude-mod-repo/context-meter
 Draws one line above the prompt:
 
 ```text
-컨텍스트 12% (119k/1M)   직전 턴 +119k   5시간 1% ↻17:30   주간 25% ↻11:00
+main   Ctx 12% (119k/1M)   Last +119k   5H 1% ↻17:30   1W 25% ↻Wed 11:00
 ```
 
 | Segment | Meaning |
 | :- | :- |
-| `컨텍스트 12% (119k/1M)` | Context window: percent full, tokens used, window size |
-| `직전 턴 +119k` | Tokens the last finished turn added. A negative number means the turn compacted the conversation |
-| `5시간 1% ↻17:30` | Five-hour plan limit: percent used, and when it resets |
-| `주간 25% ↻11:00` | Weekly plan limit: percent used, and when it resets |
+| `main` | The current git branch. Left out when the session's folder is not in a git repository. On a detached HEAD, the short commit hash |
+| `Ctx 12% (119k/1M)` | Context window: percent full, tokens used, window size |
+| `Last +119k` | Tokens the last finished turn added. A negative number means the turn compacted the conversation |
+| `5H 1% ↻17:30` | Five-hour plan limit: percent used, and when it resets |
+| `1W 25% ↻Wed 11:00` | Weekly plan limit: percent used, and when it resets |
 
 - A segment turns yellow at 70% and bold red at 90%.
 - Reset times show only when the band is at least 100 columns wide.
-- Plan limits show only on a subscription plan. On an API key the band shows the context segments alone.
+- Plan limits show only on a subscription plan. On an API key the band shows the other segments alone.
 - `/context-meter` prints the same line as text, for places that don't draw the band, such as the VS Code extension.
-- The labels are in Korean. To change them, edit the strings in [`context-meter/hooks/register.js`](context-meter/hooks/register.js).
+
+#### Options
+
+Each segment can be turned on or off.
+
+| Option | Default | What it shows |
+| :- | :- | :- |
+| `showBranch` | on | The current git branch |
+| `showDirty` | off | A `*` after the branch name when the working tree has uncommitted changes, as in `main*`. Runs `git status` on each turn |
+| `showModel` | off | The session's model |
+| `showContext` | on | `Ctx`, the context window |
+| `showLastTurn` | on | `Last`, what the last turn added |
+| `showFiveHour` | on | `5H`, the five-hour plan limit |
+| `showWeekly` | on | `1W`, the weekly plan limit |
+| `showOtherLimits` | on | Any other limit your account reports, such as a gateway's spend limit (`Spend`) |
+| `showResetTimes` | on | When each limit resets |
+| `showCost` | off | What the session has cost in US dollars, as in `$1.24`. On a subscription plan this is an estimate at API prices, not a charge |
+
+To change them in a terminal session, run `/plugin configure context-meter@claude-mod-repo`. From your shell, pass each one when you install:
+
+```bash
+claude plugin install context-meter@claude-mod-repo --config showModel=true --config showCost=true
+```
+
+A change takes effect in the next session, or after `/reload-plugins`.
 
 ### auto-pin
 
@@ -114,7 +139,7 @@ mod는 Claude Code의 모양과 동작을 바꾸는 플러그인입니다. 이 �
 
 | Mod | 하는 일 | 동작하는 곳 |
 | :- | :- | :- |
-| [`context-meter`](context-meter) | 컨텍스트 창이 얼마나 찼는지, 직전 턴이 얼마나 늘렸는지, 플랜 한도를 얼마나 썼는지를 입력창 위 한 줄로 표시 | 터미널, 데스크톱 앱 Code 탭 |
+| [`context-meter`](context-meter) | git 브랜치, 컨텍스트 창이 얼마나 찼는지, 직전 턴이 얼마나 늘렸는지, 플랜 한도를 얼마나 썼는지를 입력창 위 한 줄로 표시 | 터미널, 데스크톱 앱 Code 탭 |
 | [`auto-pin`](auto-pin) | 새 세션이 시작되면 사이드바에 바로 고정 | 데스크톱 앱 Code 탭 |
 
 ### 요구 사항
@@ -169,21 +194,46 @@ claude plugin validate ./claude-mod-repo/context-meter
 입력창 위에 한 줄을 그립니다.
 
 ```text
-컨텍스트 12% (119k/1M)   직전 턴 +119k   5시간 1% ↻17:30   주간 25% ↻11:00
+main   Ctx 12% (119k/1M)   Last +119k   5H 1% ↻17:30   1W 25% ↻Wed 11:00
 ```
 
 | 항목 | 의미 |
 | :- | :- |
-| `컨텍스트 12% (119k/1M)` | 컨텍스트 창: 찬 비율, 사용한 토큰, 창 크기 |
-| `직전 턴 +119k` | 직전에 끝난 턴이 늘린 토큰. 음수면 그 턴에서 대화가 압축된 것 |
-| `5시간 1% ↻17:30` | 5시간 플랜 한도: 사용률과 초기화 시각 |
-| `주간 25% ↻11:00` | 주간 플랜 한도: 사용률과 초기화 시각 |
+| `main` | 현재 git 브랜치. 세션 폴더가 git 리포가 아니면 생략됩니다. detached HEAD에서는 짧은 커밋 해시 |
+| `Ctx 12% (119k/1M)` | 컨텍스트 창: 찬 비율, 사용한 토큰, 창 크기 |
+| `Last +119k` | 직전에 끝난 턴이 늘린 토큰. 음수면 그 턴에서 대화가 압축된 것 |
+| `5H 1% ↻17:30` | 5시간 플랜 한도: 사용률과 초기화 시각 |
+| `1W 25% ↻Wed 11:00` | 주간 플랜 한도: 사용률과 초기화 시각 |
 
 - 각 항목은 70%부터 노란색, 90%부터 굵은 빨간색으로 바뀝니다.
 - 초기화 시각은 밴드 폭이 100칸 이상일 때만 표시됩니다.
-- 플랜 한도는 구독 플랜에서만 표시됩니다. API 키로 쓰면 컨텍스트 항목만 나옵니다.
+- 플랜 한도는 구독 플랜에서만 표시됩니다. API 키로 쓰면 나머지 항목만 나옵니다.
 - `/context-meter`는 같은 내용을 텍스트로 출력합니다. VS Code 확장처럼 밴드를 그리지 않는 곳에서 씁니다.
-- 라벨은 한국어입니다. 바꾸려면 [`context-meter/hooks/register.js`](context-meter/hooks/register.js)의 문자열을 수정하세요.
+
+#### 옵션
+
+항목마다 켜고 끌 수 있습니다.
+
+| 옵션 | 기본값 | 표시 내용 |
+| :- | :- | :- |
+| `showBranch` | 켜짐 | 현재 git 브랜치 |
+| `showDirty` | 꺼짐 | 커밋하지 않은 변경이 있으면 브랜치 이름 뒤에 `*` 표시 (예: `main*`). 턴마다 `git status`를 실행합니다 |
+| `showModel` | 꺼짐 | 세션의 모델 |
+| `showContext` | 켜짐 | `Ctx`, 컨텍스트 창 |
+| `showLastTurn` | 켜짐 | `Last`, 직전 턴이 늘린 양 |
+| `showFiveHour` | 켜짐 | `5H`, 5시간 플랜 한도 |
+| `showWeekly` | 켜짐 | `1W`, 주간 플랜 한도 |
+| `showOtherLimits` | 켜짐 | 계정이 보고하는 그 밖의 한도. 예: 게이트웨이의 지출 한도(`Spend`) |
+| `showResetTimes` | 켜짐 | 각 한도의 초기화 시각 |
+| `showCost` | 꺼짐 | 세션 비용(미국 달러, 예: `$1.24`). 구독 플랜에서는 실제 청구액이 아니라 API 가격 기준 추정치입니다 |
+
+터미널 세션에서는 `/plugin configure context-meter@claude-mod-repo`로 바꿉니다. 셸에서는 설치할 때 하나씩 넘깁니다.
+
+```bash
+claude plugin install context-meter@claude-mod-repo --config showModel=true --config showCost=true
+```
+
+변경은 다음 세션부터, 또는 `/reload-plugins` 후에 적용됩니다.
 
 ### auto-pin
 

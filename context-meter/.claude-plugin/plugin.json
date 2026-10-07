@@ -1,6 +1,68 @@
 {
   "name": "context-meter",
-  "version": "0.1.0",
-  "description": "Shows context window usage, what the last turn added, and plan limit usage above the prompt",
-  "author": { "name": "ulttla" }
+  "version": "0.2.0",
+  "description": "Shows the git branch, context window usage, what the last turn added, and plan limit usage above the prompt",
+  "author": { "name": "ulttla" },
+  "userConfig": {
+    "showBranch": {
+      "type": "boolean",
+      "title": "Branch",
+      "description": "Show the current git branch. Nothing is shown outside a git repository.",
+      "default": true
+    },
+    "showDirty": {
+      "type": "boolean",
+      "title": "Uncommitted changes mark",
+      "description": "Add * to the branch name when the working tree has uncommitted changes. Runs git status on each turn.",
+      "default": false
+    },
+    "showModel": {
+      "type": "boolean",
+      "title": "Model",
+      "description": "Show the session's model.",
+      "default": false
+    },
+    "showContext": {
+      "type": "boolean",
+      "title": "Context (Ctx)",
+      "description": "Show how full the context window is.",
+      "default": true
+    },
+    "showLastTurn": {
+      "type": "boolean",
+      "title": "Last turn (Last)",
+      "description": "Show how many tokens the last turn added.",
+      "default": true
+    },
+    "showFiveHour": {
+      "type": "boolean",
+      "title": "Five-hour limit (5H)",
+      "description": "Show how much of the five-hour plan limit is used.",
+      "default": true
+    },
+    "showWeekly": {
+      "type": "boolean",
+      "title": "Weekly limit (1W)",
+      "description": "Show how much of the weekly plan limit is used.",
+      "default": true
+    },
+    "showOtherLimits": {
+      "type": "boolean",
+      "title": "Other limits",
+      "description": "Show any other limit your account reports, such as a gateway's spend limit.",
+      "default": true
+    },
+    "showResetTimes": {
+      "type": "boolean",
+      "title": "Reset times",
+      "description": "Show when each limit resets, where the band is wide enough.",
+      "default": true
+    },
+    "showCost": {
+      "type": "boolean",
+      "title": "Session cost",
+      "description": "Show what the session has cost in US dollars. On a subscription plan this is an estimate at API prices, not a charge.",
+      "default": false
+    }
+  }
 }

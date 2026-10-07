@@ -10,7 +10,7 @@ async function pin($) {
       .map((block) => (block.type === 'text' ? block.text : ''))
       .join(' ')
       .trim()
-    return said || '사이드바가 요청을 거부했습니다'
+    return said || 'the sidebar refused the request'
   } catch (error) {
     // Outside the desktop app there is no sidebar to pin in
     return error instanceof Error ? error.message : String(error)
@@ -22,7 +22,7 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'auto-pin',
-      description: '이 세션을 사이드바에 고정',
+      description: 'Pin this session in the sidebar',
       immediate: true,
     })
     // A session that already has prompts was resumed: you may have unpinned it, so leave it
@@ -42,6 +42,6 @@ export function register(on) {
   // Pins on request, and says why when it cannot
   on('command.run', { command: 'auto-pin' }, async ($) => {
     const reason = await pin($)
-    return { text: reason === null ? '이 세션을 고정했습니다' : `고정하지 못했습니다: ${reason}` }
+    return { text: reason === null ? 'Pinned this session' : `Could not pin this session: ${reason}` }
   })
 }

@@ -8,7 +8,7 @@
     {
       "name": "context-meter",
       "source": "./context-meter",
-      "description": "Shows context window usage, what the last turn added, and plan limit usage above the prompt"
+      "description": "Shows the git branch, context window usage, what the last turn added, and plan limit usage above the prompt"
     },
     {
       "name": "auto-pin",
