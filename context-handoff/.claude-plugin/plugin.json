@@ -1,7 +1,7 @@
 {
   "name": "context-handoff",
-  "version": "0.1.2",
-  "description": "Past a context threshold, records a hand-off, clears the context, and continues from the notes in a fresh conversation",
+  "version": "0.2.0",
+  "description": "Past a context threshold, records a hand-off, resets the context (compaction, or the desktop app's clear), and continues from the notes",
   "author": {
     "name": "ulttla"
   },
@@ -24,6 +24,16 @@
       "description": "After an interrupted or failed hand-off, try again once the context has grown this many points.",
       "default": 5
     },
+    "reset": {
+      "type": "string",
+      "title": "How the context is reset",
+      "description": "compact: compact the conversation down to the notes in place; the process, model and settings stay. clear: the desktop app clears the conversation (a fresh row, the old one under Resume previous session); the app restarts the process, resets the model to the default, and the resume runs once the process is back.",
+      "options": [
+        "compact",
+        "clear"
+      ],
+      "default": "compact"
+    },
     "closeCommand": {
       "type": "string",
       "title": "Project close skill",
@@ -39,7 +49,7 @@
     "resumePrompt": {
       "type": "string",
       "title": "Resume prompt",
-      "description": "Replaces the built-in prompt submitted after the clear.",
+      "description": "Replaces the built-in prompt submitted after the reset.",
       "default": ""
     },
     "pauseRemoteControl": {

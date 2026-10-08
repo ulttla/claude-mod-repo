@@ -2,12 +2,25 @@
 const NAME = 'context-handoff'
 // A tag every prompt this mod submits carries, so its own turn can be told apart
 const MARK = '[context-handoff]'
+// The store key that survives the desktop app's clear, which ends the process
+const RESUME_KEY = 'pendingResume'
+// How long a pending resume in the store stays valid
+const RESUME_WINDOW_MS = 15 * 60 * 1000
+// How long the app gets to clear the conversation once the hand-off turn has ended
+const CLEAR_WAIT_MS = 8000
+// When the compaction is tried after the hand-off turn: it is refused while a turn still runs
+const COMPACT_TRIES_MS = [300, 1000, 2000, 4000, 8000]
+// What the summarizer is told when the conversation is compacted after a hand-off
+const COMPACT_INSTRUCTIONS =
+  'A hand-off for a fresh start was just recorded in the project notes. Keep only: where the notes are (file and section), ' +
+  'the exact next step, and any question still waiting for the user. Leave out everything else; it is in the notes.'
 
 // Where the hand-off stands:
-//   idle      nothing in progress
-//   closing   the hand-off prompt is submitted; waiting for its turn to finish
-//   clearing  the clear is requested; waiting for the conversation to end with it
-//   resuming  the conversation was cleared; waiting to submit the resume prompt
+//   idle        nothing in progress
+//   closing     the hand-off prompt is submitted; waiting for its turn to run and finish
+//   clearing    (clear) the app was asked to clear; waiting for the conversation to end with it
+//   compacting  (compact) the hand-off turn has ended; compacting the conversation
+//   resuming    the conversation was reset; waiting to submit the resume prompt
 let phase = 'idle'
 // The hand-off prompt as submitted, and the id of the turn running it
 let closeText = null
@@ -18,8 +31,8 @@ let triggeredAt = null
 let resumeTimer = null
 // Gives up when the app has not cleared the conversation soon after the hand-off turn ended
 let clearWatchdog = null
-// How long the app gets to clear the conversation once the hand-off turn has ended
-const CLEAR_WAIT_MS = 8000
+// The compaction attempt waiting to run
+let compactTimer = null
 // True while Remote Control is turned off for the clear, to be turned on again after the resume
 let remoteControlPaused = false
 // The last thing that happened, for /handoff-status
@@ -37,6 +50,7 @@ function settingsOf(options) {
     enabled: options.enabled !== false,
     threshold: numberOf(options.threshold, 40, 1, 100),
     step: numberOf(options.retriggerStep, 5, 1, 100),
+    reset: options.reset === 'clear' ? 'clear' : 'compact',
     closeCommand: String(options.closeCommand ?? 'session-close').trim().replace(/^\//, ''),
     closePrompt: String(options.closePrompt ?? '').trim(),
     resumePrompt: String(options.resumePrompt ?? '').trim(),
@@ -56,30 +70,29 @@ function closePromptFor(cfg, percent, hasCommand) {
   const level = `The context window is ${Math.round(percent)}% full, past the ${cfg.threshold}% hand-off threshold.`
   const pending =
     'If the previous turn stopped to ask the user something, put that question in the notes instead of answering it.'
+  const then = 'the context is then reset automatically and the work continues from the notes.'
   if (cfg.closePrompt) return `${MARK} ${fillIn(cfg.closePrompt, percent, cfg)}`
   // A prompt may not begin with a slash, so the skill is named for the model to invoke
   if (hasCommand) {
     return (
       `${MARK} ${level} Run this project's /${cfg.closeCommand} skill now (invoke it with the Skill tool) to record the hand-off, ` +
-      'and make the next starting point exact. ' +
-      `After this turn the context is cleared automatically and a new conversation continues from the notes. ${pending}`
+      `and make the next starting point exact. ${pending} When the notes are written, stop: ${then}`
     )
   }
   return (
-    `${MARK} ${level} Do not start new work. Record a hand-off for a fresh conversation: ` +
+    `${MARK} ${level} Do not start new work. Record a hand-off for a fresh start: ` +
     "if this project's CLAUDE.md defines a session-close or progress-logging procedure, follow it; " +
     'otherwise update PROGRESS.md if the project has one, or else write HANDOFF.md at the project root. ' +
     'Cover what was done this session, the current state, measured facts worth not measuring again, open questions, ' +
-    `and the exact next step. ${pending} ` +
-    'When the notes are written, stop: the context is then cleared automatically and a new conversation continues from them.'
+    `and the exact next step. ${pending} When the notes are written, stop: ${then}`
   )
 }
 
-// The prompt that continues the work after the clear
+// The prompt that continues the work after the reset
 function resumePromptFor(cfg) {
   if (cfg.resumePrompt) return `${MARK} ${cfg.resumePrompt}`
   return (
-    `${MARK} The context was cleared after a hand-off. Read this project's hand-off notes: ` +
+    `${MARK} The context was reset after a hand-off. Read this project's hand-off notes: ` +
     'the progress file CLAUDE.md names, else PROGRESS.md, else HANDOFF.md at the project root. ' +
     'Say in one line what you are picking up, then continue from the recorded next step without redoing work the notes mark as done. ' +
     'If the notes hold a question for the user, ask it and wait.'
@@ -142,6 +155,18 @@ async function callApp($, tool, args) {
   }
 }
 
+// The desktop app's id of this session, which outlives the process; null outside the app
+async function appSessionId($) {
+  try {
+    const result = await $.mcp.call('ccd_session_mgmt', 'get_session', { session_id: 'self' })
+    if (result.isError) return null
+    const id = JSON.parse(textOf(result)).sessionId
+    return typeof id === 'string' ? id : null
+  } catch {
+    return null
+  }
+}
+
 // Turn Remote Control on again after it was turned off for the clear
 async function restoreRemoteControl($) {
   if (!remoteControlPaused) return
@@ -150,14 +175,15 @@ async function restoreRemoteControl($) {
   note($, failed ? `Remote Control could not be turned on again: ${failed}` : 'Remote Control turned on again')
 }
 
-function cancelResumeTimer() {
+function cancelTimers() {
   if (resumeTimer) resumeTimer.cancel()
-  resumeTimer = null
+  if (clearWatchdog) clearWatchdog.cancel()
+  if (compactTimer) compactTimer.cancel()
+  resumeTimer = clearWatchdog = compactTimer = null
 }
 
-function cancelClearWatchdog() {
-  if (clearWatchdog) clearWatchdog.cancel()
-  clearWatchdog = null
+function forgetPendingResume($) {
+  $.store.delete(RESUME_KEY).catch(() => {})
 }
 
 // Give up the hand-off in progress and say why; the next tries once the context grew by the step
@@ -165,8 +191,8 @@ function abandon($, reason) {
   phase = 'idle'
   closeText = null
   closeTurnId = null
-  cancelResumeTimer()
-  cancelClearWatchdog()
+  cancelTimers()
+  forgetPendingResume($)
   note($, `gave up: ${reason}`)
   $.ui.toast(`${NAME}: ${reason}. /handoff-now retries.`, { timeoutMs: 8000 })
   void restoreRemoteControl($)
@@ -177,7 +203,7 @@ async function begin($, cfg, percent, why) {
   phase = 'closing'
   closeTurnId = null
   triggeredAt = percent
-  cancelClearWatchdog()
+  cancelTimers()
   const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand))
   closeText = text
   note($, `hand-off started: ${why}`)
@@ -211,6 +237,16 @@ async function requestClear($, cfg) {
     refused = await callApp($, 'clear_session', { session_id: 'self' })
   }
   if (refused) return abandon($, `the app refused to clear the context: ${refused}`)
+  // The clear ends this process; the next one finds the resume to make in the store
+  try {
+    await $.store.set(RESUME_KEY, {
+      appSessionId: await appSessionId($),
+      cwd: await $.session.cwd(),
+      askedAt: await $.clock.now(),
+    })
+  } catch (error) {
+    note($, `the resume could not be stored for the next process: ${messageOf(error)}`)
+  }
   note($, 'the app will clear the conversation when the hand-off turn ends')
 }
 
@@ -218,13 +254,43 @@ async function requestClear($, cfg) {
 function awaitClear($) {
   note($, 'hand-off recorded, waiting for the app to clear the conversation')
   $.ui.toast(`${NAME}: hand-off recorded, clearing the context`)
-  cancelClearWatchdog()
+  if (clearWatchdog) clearWatchdog.cancel()
   clearWatchdog = $.clock.after(CLEAR_WAIT_MS, () => {
     clearWatchdog = null
     if (phase === 'clearing') {
       abandon($, `the app did not clear the conversation within ${CLEAR_WAIT_MS / 1000} s of the hand-off turn ending`)
     }
   })
+}
+
+// The hand-off turn has ended: compact the conversation down to the notes, then resume.
+// A compaction is refused while a turn still runs, so it is tried a few times.
+function startCompaction($, cfg) {
+  phase = 'compacting'
+  note($, 'hand-off recorded, compacting the conversation')
+  $.ui.toast(`${NAME}: hand-off recorded, compacting the conversation`)
+  const attempt = (i) => {
+    compactTimer = $.clock.after(COMPACT_TRIES_MS[i], async () => {
+      compactTimer = null
+      if (phase !== 'compacting') return
+      let result
+      try {
+        result = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS })
+      } catch (error) {
+        if (i + 1 < COMPACT_TRIES_MS.length) return attempt(i + 1)
+        return abandon($, `the conversation could not be compacted: ${messageOf(error)}`)
+      }
+      if (result && result.skip) return abandon($, `the compaction was skipped: ${result.skip}`)
+      const sizes =
+        typeof result?.tokensBefore === 'number' && typeof result?.tokensAfter === 'number'
+          ? ` (${result.tokensBefore} to ${result.tokensAfter} tokens)`
+          : ''
+      note($, `compacted the conversation${sizes}`)
+      phase = 'resuming'
+      submitResume($, cfg)
+    })
+  }
+  attempt(0)
 }
 
 // Submit the resume prompt into the fresh conversation, once
@@ -234,11 +300,35 @@ function submitResume($, cfg) {
   closeText = null
   closeTurnId = null
   triggeredAt = null
-  cancelResumeTimer()
-  cancelClearWatchdog()
+  cancelTimers()
+  forgetPendingResume($)
   note($, 'continuing in a fresh context')
   $.ui.toast(`${NAME}: continuing in a fresh context`)
   $.prompt.submit({ text: resumePromptFor(cfg), asUser: true }).catch(() => {})
+}
+
+// A fresh process after the app's clear: when the store says this session's hand-off asked
+// for a resume, and no prompt has run yet, continue from the notes
+async function resumeIfPending($, cfg) {
+  let pending
+  try {
+    pending = await $.store.get(RESUME_KEY)
+  } catch {
+    return
+  }
+  if (!pending || typeof pending !== 'object') return
+  const forget = () => forgetPendingResume($)
+  if ((await $.session.turns()) !== 0) return forget()
+  if (typeof pending.askedAt !== 'number' || (await $.clock.now()) - pending.askedAt > RESUME_WINDOW_MS) return forget()
+  const id = await appSessionId($)
+  const isThisSession =
+    id && pending.appSessionId ? id === pending.appSessionId : (await $.session.cwd()) === pending.cwd
+  // Another session's hand-off: leave its resume to it
+  if (!isThisSession) return
+  forget()
+  phase = 'resuming'
+  note($, 'a fresh process after the clear; continuing from the notes')
+  resumeTimer = $.clock.after(1000, () => submitResume($, cfg))
 }
 
 export function register(on, options) {
@@ -248,22 +338,23 @@ export function register(on, options) {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'handoff-now',
-      description: 'Record a hand-off now, clear the context, and continue from the notes',
+      description: 'Record a hand-off now, reset the context, and continue from the notes',
     })
     await $.command.register({
       name: 'handoff-status',
       description: 'Show where the automatic hand-off stands and what it did last',
     })
+    await resumeIfPending($, cfg)
     return next(e)
   })
 
-  // The turn that runs the hand-off prompt is the one whose text carries the tag. The clear is
-  // asked for as it starts, so the app clears the conversation as this turn ends.
+  // The turn that runs the hand-off prompt is the one whose text carries the tag. With the
+  // clear, the app is asked as it starts, so the conversation is cleared as this turn ends.
   on('turn.start', async ($, e, next) => {
     if (phase === 'closing' && closeTurnId === null && typeof e.text === 'string' && e.text.includes(MARK)) {
       closeTurnId = e.turnId
       note($, 'the hand-off turn is running')
-      await requestClear($, cfg)
+      if (cfg.reset === 'clear') await requestClear($, cfg)
     }
     return next(e)
   })
@@ -274,8 +365,13 @@ export function register(on, options) {
     if (e.agentId !== undefined) return out
     const ended = e.reason ?? (e.isAborted ? 'aborted' : 'answer')
 
-    // The hand-off prompt is still queued, behind the turn that just ran
-    if (phase === 'closing') return out
+    if (phase === 'closing') {
+      // The hand-off prompt is still queued, behind the turn that just ran
+      if (e.turnId !== closeTurnId) return out
+      if (ended === 'aborted') abandon($, 'the hand-off turn was interrupted')
+      else startCompaction($, cfg)
+      return out
+    }
     if (phase === 'clearing') {
       if (e.turnId === closeTurnId) {
         // An interrupted hand-off turn takes the app's queued clear with it
@@ -300,17 +396,15 @@ export function register(on, options) {
     return out
   })
 
-  // A /clear ends the conversation; the process goes on with a fresh one
+  // A /clear ends the conversation; where the process goes on, it continues with a fresh one
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' && phase === 'clearing') {
       phase = 'resuming'
-      cancelClearWatchdog()
-      cancelResumeTimer()
+      cancelTimers()
       resumeTimer = $.clock.after(3000, () => submitResume($, cfg))
     } else if (e.reason !== 'clear') {
       phase = 'idle'
-      cancelResumeTimer()
-      cancelClearWatchdog()
+      cancelTimers()
     }
     return next(e)
   })
@@ -335,7 +429,7 @@ export function register(on, options) {
     return {
       text:
         `Recording the hand-off at ${Math.round(percent)}% context. ` +
-        'Once it is written the context is cleared and a new conversation continues from the notes.',
+        `Once it is written the context is reset (${cfg.reset}) and the work continues from the notes.`,
     }
   })
 
@@ -345,7 +439,7 @@ export function register(on, options) {
     return {
       text:
         `Phase: ${phase}. Context: ${fill} (threshold ${cfg.threshold}%). ` +
-        `Automatic hand-off: ${cfg.enabled ? 'on' : 'off'}. Last: ${lastOutcome}.`,
+        `Automatic hand-off: ${cfg.enabled ? 'on' : 'off'}. Reset: ${cfg.reset}. Last: ${lastOutcome}.`,
     }
   })
 }
