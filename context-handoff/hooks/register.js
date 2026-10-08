@@ -10,6 +10,10 @@ const RESUME_WINDOW_MS = 15 * 60 * 1000
 const CLEAR_WAIT_MS = 8000
 // When the compaction is tried after the hand-off turn: it is refused while a turn still runs
 const COMPACT_TRIES_MS = [300, 1000, 2000, 4000, 8000]
+// How long the /compact command gets to compact the conversation where it stands in for the call
+const COMPACT_COMMAND_WAIT_MS = 5 * 60 * 1000
+// How long after the compaction the resume prompt is submitted
+const RESUME_AFTER_COMPACT_MS = 1000
 // What the summarizer is told when the conversation is compacted after a hand-off
 const COMPACT_INSTRUCTIONS =
   'A hand-off for a fresh start was just recorded in the project notes. Keep only: where the notes are (file and section), ' +
@@ -33,6 +37,11 @@ let resumeTimer = null
 let clearWatchdog = null
 // The compaction attempt waiting to run
 let compactTimer = null
+// How the conversation is being compacted: the engine's call, or the /compact command where
+// the session has no such call (a headless one, as the desktop app runs)
+let compactVia = null
+// Gives up when the /compact command has not compacted the conversation in time
+let compactWatchdog = null
 // True while Remote Control is turned off for the clear, to be turned on again after the resume
 let remoteControlPaused = false
 // The last thing that happened, for /handoff-status
@@ -51,6 +60,7 @@ function settingsOf(options) {
     threshold: numberOf(options.threshold, 40, 1, 100),
     step: numberOf(options.retriggerStep, 5, 1, 100),
     reset: options.reset === 'clear' ? 'clear' : 'compact',
+    compaction: options.compaction === 'call' || options.compaction === 'command' ? options.compaction : 'auto',
     closeCommand: String(options.closeCommand ?? 'session-close').trim().replace(/^\//, ''),
     closePrompt: String(options.closePrompt ?? '').trim(),
     resumePrompt: String(options.resumePrompt ?? '').trim(),
@@ -66,14 +76,14 @@ function fillIn(text, percent, cfg) {
 
 // The prompt that records the hand-off: the project's own close skill when it has one,
 // a custom prompt when configured, or the built-in instructions
-function closePromptFor(cfg, percent, hasCommand) {
+function closePromptFor(cfg, percent, hasClose) {
   const level = `The context window is ${Math.round(percent)}% full, past the ${cfg.threshold}% hand-off threshold.`
   const pending =
     'If the previous turn stopped to ask the user something, put that question in the notes instead of answering it.'
   const then = 'the context is then reset automatically and the work continues from the notes.'
   if (cfg.closePrompt) return `${MARK} ${fillIn(cfg.closePrompt, percent, cfg)}`
   // A prompt may not begin with a slash, so the skill is named for the model to invoke
-  if (hasCommand) {
+  if (hasClose) {
     return (
       `${MARK} ${level} Run this project's /${cfg.closeCommand} skill now (invoke it with the Skill tool) to record the hand-off, ` +
       `and make the next starting point exact. ${pending} When the notes are written, stop: ${then}`
@@ -109,6 +119,19 @@ function textOf(result) {
     .map((block) => (block.type === 'text' ? block.text : ''))
     .join(' ')
     .trim()
+}
+
+// Whether the engine answered that this session has no compaction call: a headless (SDK)
+// session, as the desktop app runs, where a compaction runs as a /compact prompt
+function hasNoCompactCall(message) {
+  return /headless|SDK|\/compact prompt/i.test(message)
+}
+
+// The sizes a compaction reports, for the transcript line
+function sizesOf(result) {
+  return typeof result?.tokensBefore === 'number' && typeof result?.tokensAfter === 'number'
+    ? ` (${result.tokensBefore} to ${result.tokensAfter} tokens)`
+    : ''
 }
 
 // Keep what happened: a dim line in the transcript, and the answer of /handoff-status
@@ -179,7 +202,8 @@ function cancelTimers() {
   if (resumeTimer) resumeTimer.cancel()
   if (clearWatchdog) clearWatchdog.cancel()
   if (compactTimer) compactTimer.cancel()
-  resumeTimer = clearWatchdog = compactTimer = null
+  if (compactWatchdog) compactWatchdog.cancel()
+  resumeTimer = clearWatchdog = compactTimer = compactWatchdog = null
 }
 
 function forgetPendingResume($) {
@@ -191,6 +215,7 @@ function abandon($, reason) {
   phase = 'idle'
   closeText = null
   closeTurnId = null
+  compactVia = null
   cancelTimers()
   forgetPendingResume($)
   note($, `gave up: ${reason}`)
@@ -264,33 +289,77 @@ function awaitClear($) {
 }
 
 // The hand-off turn has ended: compact the conversation down to the notes, then resume.
-// A compaction is refused while a turn still runs, so it is tried a few times.
+// A compaction is refused while a turn still runs, so it is tried a few times. A session
+// with no compaction call of its own (the desktop app's) compacts through /compact instead,
+// as does one configured to.
 function startCompaction($, cfg) {
   phase = 'compacting'
+  compactVia = 'call'
   note($, 'hand-off recorded, compacting the conversation')
   $.ui.toast(`${NAME}: hand-off recorded, compacting the conversation`)
   const attempt = (i) => {
     compactTimer = $.clock.after(COMPACT_TRIES_MS[i], async () => {
       compactTimer = null
       if (phase !== 'compacting') return
+      if (cfg.compaction === 'command') return compactByCommand($, cfg, 'compacting through /compact, as configured')
       let result
       try {
         result = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS })
       } catch (error) {
+        const message = messageOf(error)
+        if (cfg.compaction === 'auto' && hasNoCompactCall(message)) {
+          return compactByCommand($, cfg, 'this session has no compaction call; compacting through /compact')
+        }
         if (i + 1 < COMPACT_TRIES_MS.length) return attempt(i + 1)
-        return abandon($, `the conversation could not be compacted: ${messageOf(error)}`)
+        return abandon($, `the conversation could not be compacted: ${message}`)
       }
       if (result && result.skip) return abandon($, `the compaction was skipped: ${result.skip}`)
-      const sizes =
-        typeof result?.tokensBefore === 'number' && typeof result?.tokensAfter === 'number'
-          ? ` (${result.tokensBefore} to ${result.tokensAfter} tokens)`
-          : ''
-      note($, `compacted the conversation${sizes}`)
-      phase = 'resuming'
-      submitResume($, cfg)
+      compacted($, cfg, `compacted the conversation${sizesOf(result)}`, 0)
     })
   }
   attempt(0)
+}
+
+// Compact through the /compact command, queued as if typed, with the same instructions.
+// The compaction is seen as it runs, by the session.compact hook; the command's own answer,
+// which may come later or never, stands in when the hook saw nothing.
+function compactByCommand($, cfg, why) {
+  compactVia = 'command'
+  note($, why)
+  if (compactWatchdog) compactWatchdog.cancel()
+  compactWatchdog = $.clock.after(COMPACT_COMMAND_WAIT_MS, () => {
+    compactWatchdog = null
+    if (phase === 'compacting') {
+      abandon($, `the /compact command did not compact the conversation within ${COMPACT_COMMAND_WAIT_MS / 60000} min`)
+    }
+  })
+  $.command
+    .run({ command: 'compact', args: COMPACT_INSTRUCTIONS })
+    .then(async (result) => {
+      if (phase !== 'compacting') return
+      // The hook saw no compaction: the context says whether the command made one
+      const percent = await readPercent($)
+      const answer = typeof result?.text === 'string' && result.text.trim() ? `: ${result.text.trim().slice(0, 160)}` : ''
+      if (percent !== null && triggeredAt && percent >= triggeredAt) {
+        return abandon($, `the /compact command ran, but the context is still at ${Math.round(percent)}%${answer}`)
+      }
+      compacted($, cfg, `the /compact command finished${percent === null ? '' : `, the context at ${Math.round(percent)}%`}`)
+    })
+    .catch((error) => {
+      if (phase === 'compacting') abandon($, `the /compact command failed: ${messageOf(error)}`)
+    })
+}
+
+// The conversation is compacted: the resume prompt follows, once. From the engine's call it
+// follows at once (the call resolves between turns, the compaction installed); from /compact
+// a moment later, as the hook sees the compaction while the command's turn still runs.
+function compacted($, cfg, what, afterMs = RESUME_AFTER_COMPACT_MS) {
+  if (phase !== 'compacting') return
+  phase = 'resuming'
+  cancelTimers()
+  note($, what)
+  if (afterMs === 0) submitResume($, cfg)
+  else resumeTimer = $.clock.after(afterMs, () => submitResume($, cfg))
 }
 
 // Submit the resume prompt into the fresh conversation, once
@@ -300,6 +369,7 @@ function submitResume($, cfg) {
   closeText = null
   closeTurnId = null
   triggeredAt = null
+  compactVia = null
   cancelTimers()
   forgetPendingResume($)
   note($, 'continuing in a fresh context')
@@ -393,6 +463,24 @@ export function register(on, options) {
     if (percent === null || percent < cfg.threshold) return out
     if (triggeredAt !== null && percent < triggeredAt + cfg.step) return out
     await begin($, cfg, percent, `context at ${Math.round(percent)}%, past ${cfg.threshold}%`)
+    return out
+  })
+
+  // A compaction run through /compact passes here as it runs: once it stands, the resume
+  // follows; a compaction the engine makes on its own meanwhile serves as well
+  on('session.compact', async ($, e, next) => {
+    const watching = phase === 'compacting' && compactVia === 'command' && e.agentId === undefined
+    let out
+    try {
+      out = await next(e)
+    } catch (error) {
+      if (watching && phase === 'compacting') abandon($, `the compaction failed: ${messageOf(error)}`)
+      throw error
+    }
+    if (watching && phase === 'compacting') {
+      if (out && out.skip !== undefined) abandon($, `the compaction was skipped: ${out.skip}`)
+      else compacted($, cfg, `compacted the conversation${sizesOf(out)}`)
+    }
     return out
   })
 

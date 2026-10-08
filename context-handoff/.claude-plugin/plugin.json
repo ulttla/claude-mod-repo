@@ -1,7 +1,7 @@
 {
   "name": "context-handoff",
-  "version": "0.2.0",
-  "description": "Past a context threshold, records a hand-off, resets the context (compaction, or the desktop app's clear), and continues from the notes",
+  "version": "0.2.1",
+  "description": "Past a context threshold, records a hand-off, resets the context (a compaction in place, through /compact where the session has no compaction call, or the desktop app's clear), and continues from the notes",
   "author": {
     "name": "ulttla"
   },
@@ -33,6 +33,17 @@
         "clear"
       ],
       "default": "compact"
+    },
+    "compaction": {
+      "type": "string",
+      "title": "How the compaction is made",
+      "description": "auto: the engine's compaction call, or the /compact command where the session has no such call (the desktop app's). call: the call alone. command: /compact alone, queued as if typed.",
+      "options": [
+        "auto",
+        "call",
+        "command"
+      ],
+      "default": "auto"
     },
     "closeCommand": {
       "type": "string",

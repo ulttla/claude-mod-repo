@@ -192,6 +192,160 @@ test('a skipped compaction is given up', async ($, on) => {
   expect(submitted.length).toBe(1)
 })
 
+// --- The /compact command in the call's place: chosen, or where the session has no call (the desktop app's) ---
+
+const COMMAND = { options: { compaction: 'command' } }
+
+// One /compact run the mod asked for
+type CommandRun = { command: string; args: string }
+
+test('with the command, /compact is run with the instructions and the resume follows its compaction', COMMAND, async ($, on) => {
+  const context = { percent: 45 }
+  const ran: CommandRun[] = []
+  const engine = $
+  const { submitted, logged, compactions, clock } = wire($, on, context, { commands: ['compact'] })
+  // The engine runs the queued /compact as a turn: the compaction passes through the mod's hook, then the command answers
+  on('command.run', async (_, e) => {
+    ran.push({ command: e.command, args: e.args })
+    const result = await engine.session.compact({ trigger: 'manual', instructions: e.args, messages: TRANSCRIPT })
+    context.percent = 3
+    return { text: result.skip ? `skipped: ${result.skip}` : 'Compacted' }
+  })
+  await handOff($, submitted)
+  expect(ran.length).toBe(0)
+  await clock.advance(300)
+
+  // No call was made; /compact ran with the same instructions, and its compaction was seen
+  expect(ran.length).toBe(1)
+  expect(ran[0].command).toBe('compact')
+  expect(ran[0].args).toContain('Keep only')
+  expect(compactions).toEqual([ran[0].args])
+  expect(logged.slice(-3)).toEqual([
+    'context-handoff: hand-off recorded, compacting the conversation',
+    'context-handoff: compacting through /compact, as configured',
+    'context-handoff: compacted the conversation (450000 to 2100 tokens)',
+  ])
+
+  // The resume prompt follows a moment later, once
+  expect(submitted.length).toBe(1)
+  await clock.advance(1000)
+  expect(submitted.length).toBe(2)
+  expect(submitted[1]).toContain('reset after a hand-off')
+  expect(logged.at(-1)).toBe('context-handoff: continuing in a fresh context')
+  await clock.advance(5 * 60 * 1000)
+  expect(submitted.length).toBe(2)
+
+  const status = await $.command.run({ command: 'handoff-status' })
+  expect(status.text).toContain('Phase: idle.')
+})
+
+test('when the hook sees no compaction, the /compact command is taken at its word once the context has dropped', COMMAND, async ($, on) => {
+  const context = { percent: 45 }
+  const { submitted, logged, clock } = wire($, on, context, { commands: ['compact'] })
+  on('command.run', () => {
+    context.percent = 4
+    return { text: 'Compacted' }
+  })
+  await handOff($, submitted)
+  await clock.advance(300)
+  expect(logged.at(-1)).toBe('context-handoff: the /compact command finished, the context at 4%')
+  expect(submitted.length).toBe(1)
+  await clock.advance(1000)
+  expect(submitted.length).toBe(2)
+  expect(submitted[1]).toContain('reset after a hand-off')
+})
+
+test('a /compact command that leaves the context where it was is given up', COMMAND, async ($, on) => {
+  const { submitted, logged, clock } = wire($, on, { percent: 45 }, { commands: ['compact'] })
+  on('command.run', () => ({ text: 'Error compacting conversation' }))
+  await handOff($, submitted)
+  await clock.advance(300)
+  expect(logged.at(-1)).toBe(
+    'context-handoff: gave up: the /compact command ran, but the context is still at 45%: Error compacting conversation',
+  )
+  await clock.advance(1000)
+  expect(submitted.length).toBe(1)
+})
+
+test('a /compact command the session refuses is given up', COMMAND, async ($, on) => {
+  const { submitted, logged, clock } = wire($, on, { percent: 45 }, { commands: [] })
+  await handOff($, submitted)
+  await clock.advance(300)
+  expect(logged.at(-1)).toContain('context-handoff: gave up: the /compact command failed: ')
+  await clock.advance(1000)
+  expect(submitted.length).toBe(1)
+})
+
+test('a compaction /compact runs that is skipped is given up', COMMAND, async ($, on) => {
+  const engine = $
+  const { submitted, logged, clock } = wire($, on, { percent: 45 }, {
+    compact: () => ({ skip: 'a hook vetoed it' }),
+    commands: ['compact'],
+  })
+  on('command.run', async (_, e) => {
+    const result = await engine.session.compact({ trigger: 'manual', instructions: e.args, messages: TRANSCRIPT })
+    return { text: result.skip ? `skipped: ${result.skip}` : 'Compacted' }
+  })
+  await handOff($, submitted)
+  await clock.advance(300)
+  expect(logged.at(-1)).toBe('context-handoff: gave up: the compaction was skipped: a hook vetoed it')
+  await clock.advance(1000)
+  expect(submitted.length).toBe(1)
+})
+
+test("a compaction the engine makes on its own while /compact is awaited serves as the hand-off's", COMMAND, async ($, on) => {
+  const context = { percent: 45 }
+  const { submitted, logged, clock } = wire($, on, context, { commands: ['compact'] })
+  let answer: (() => void) | null = null
+  on('command.run', () => new Promise<{ text: string }>((resolve) => (answer = () => resolve({ text: 'Compacted' }))))
+  await handOff($, submitted)
+  await clock.advance(300)
+  expect(logged.at(-1)).toBe('context-handoff: compacting through /compact, as configured')
+
+  // The threshold compaction runs first
+  await $.session.compact({ trigger: 'auto', messages: TRANSCRIPT })
+  expect(logged.at(-1)).toBe('context-handoff: compacted the conversation (450000 to 2100 tokens)')
+  await clock.advance(1000)
+  expect(submitted.length).toBe(2)
+
+  // The command's own answer, arriving afterwards, changes nothing
+  answer!()
+  await clock.advance(0)
+  expect(submitted.length).toBe(2)
+  expect(logged.at(-1)).toBe('context-handoff: continuing in a fresh context')
+})
+
+test('a /compact command that never compacts is given up after five minutes', COMMAND, async ($, on) => {
+  const { submitted, logged, clock } = wire($, on, { percent: 45 }, { commands: ['compact'] })
+  on('command.run', () => new Promise<{ text: string }>(() => {}))
+  await handOff($, submitted)
+  await clock.advance(300)
+  await clock.advance(5 * 60 * 1000 - 1)
+  expect(logged.at(-1)).toBe('context-handoff: compacting through /compact, as configured')
+  await clock.advance(1)
+  expect(logged.at(-1)).toBe('context-handoff: gave up: the /compact command did not compact the conversation within 5 min')
+  expect(submitted.length).toBe(1)
+})
+
+test('with the call alone, a refusal naming a headless session is retried like any other', { options: { compaction: 'call' } }, async ($, on) => {
+  const ran: CommandRun[] = []
+  const { submitted, compactions, logged, clock } = wire($, on, { percent: 45 }, {
+    compact: () => {
+      throw new Error('not available in a headless (-p / SDK) session yet')
+    },
+    commands: ['compact'],
+  })
+  on('command.run', (_, e) => {
+    ran.push({ command: e.command, args: e.args })
+    return { text: 'Compacted' }
+  })
+  await handOff($, submitted)
+  await clock.advance(300 + 1000 + 2000 + 4000 + 8000)
+  expect(compactions.length).toBe(5)
+  expect(ran.length).toBe(0)
+  expect(logged.at(-1)).toContain('context-handoff: gave up: the conversation could not be compacted')
+})
+
 test('below the threshold nothing happens', async ($, on) => {
   const { submitted, compactions } = wire($, on, { percent: 39 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })

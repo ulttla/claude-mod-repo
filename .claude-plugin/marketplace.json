@@ -20,7 +20,7 @@
     {
       "name": "context-handoff",
       "source": "./context-handoff",
-      "description": "Past a context threshold, records a hand-off, clears the context, and continues from the notes in a fresh conversation"
+      "description": "Past a context threshold, records a hand-off, resets the context (a compaction in place, or the desktop app's clear), and continues from the notes"
     }
   ]
 }
