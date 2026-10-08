@@ -1,8 +1,10 @@
 {
   "name": "context-handoff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Past a context threshold, records a hand-off, clears the context, and continues from the notes in a fresh conversation",
-  "author": { "name": "ulttla" },
+  "author": {
+    "name": "ulttla"
+  },
   "userConfig": {
     "enabled": {
       "type": "boolean",
@@ -39,6 +41,12 @@
       "title": "Resume prompt",
       "description": "Replaces the built-in prompt submitted after the clear.",
       "default": ""
+    },
+    "pauseRemoteControl": {
+      "type": "boolean",
+      "title": "Pause Remote Control for the clear",
+      "description": "A session serving Remote Control cannot be cleared. On, the mod turns Remote Control off for the clear and on again once the fresh conversation has run its first turn.",
+      "default": true
     }
   }
 }

@@ -134,9 +134,10 @@ After each turn it reads how full the context window is. Past the threshold (40%
 
 Each step shows a toast. A message you had already queued runs first; if one runs after the clear was asked for, the notes are recorded again so nothing is lost. If you interrupt the hand-off turn, or the app refuses the clear, the mod gives up, says why, and tries again once the context has grown by another 5 points.
 
-- `/handoff-now` hands off right away, at any context size.
+- `/handoff-now` hands off right away, at any context size. `/handoff-status` shows where the hand-off stands and what the mod did last.
+- A session serving Remote Control cannot be cleared, so the mod turns Remote Control off for the clear and on again once the fresh conversation has run its first turn (`pauseRemoteControl`).
 - Outside the Desktop app there is no app to clear the conversation, so the mod records the notes and then reports that it could not clear.
-- The prompts the mod submits are shown in the transcript, marked `[context-handoff]`.
+- The prompts the mod submits are shown in the transcript, marked `[context-handoff]`, and each step leaves a dim `context-handoff:` line there.
 
 #### Options
 
@@ -148,6 +149,7 @@ Each step shows a toast. A message you had already queued runs first; if one run
 | `closeCommand` | `session-close` | The project skill Claude is told to run to record the hand-off, when the project has it |
 | `closePrompt` | empty | Replaces the built-in hand-off prompt and the close skill. `{percent}` and `{threshold}` are filled in |
 | `resumePrompt` | empty | Replaces the built-in prompt submitted after the clear |
+| `pauseRemoteControl` | on | Turn Remote Control off for the clear, and on again after the resume. Off, a session serving Remote Control is not cleared |
 
 To change them in a terminal session, run `/plugin configure context-handoff@claude-mod-repo`, or pass them when you install:
 
@@ -303,9 +305,10 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 
 단계마다 토스트로 알립니다. 이미 대기 중이던 메시지가 있으면 그것이 먼저 실행되고, 비우기 요청 뒤에 턴이 실행되면 기록을 다시 써서 빠지는 내용이 없게 합니다. 인계 턴을 중단하거나 앱이 비우기를 거부하면 포기하고 이유를 알린 뒤, 컨텍스트가 5포인트 더 차면 다시 시도합니다.
 
-- `/handoff-now`는 컨텍스트 크기와 상관없이 바로 인계합니다.
+- `/handoff-now`는 컨텍스트 크기와 상관없이 바로 인계합니다. `/handoff-status`는 인계가 어느 단계인지와 마지막으로 한 일을 보여 줍니다.
+- Remote Control을 서비스 중인 세션은 비울 수 없으므로, 비우는 동안 Remote Control을 끄고 새 대화가 첫 턴을 마치면 다시 켭니다(`pauseRemoteControl`).
 - 데스크톱 앱 밖에는 대화를 비워 줄 앱이 없으므로, 기록만 쓴 뒤 비우지 못했다고 알립니다.
-- mod가 제출하는 프롬프트는 `[context-handoff]` 표시와 함께 대화에 보입니다.
+- mod가 제출하는 프롬프트는 `[context-handoff]` 표시와 함께 대화에 보이고, 단계마다 흐릿한 `context-handoff:` 줄이 대화에 남습니다.
 
 #### 옵션
 
@@ -317,6 +320,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 | `closeCommand` | `session-close` | 프로젝트에 있을 때 인계 기록용으로 실행하라고 지시할 스킬 |
 | `closePrompt` | 비어 있음 | 내장 인계 프롬프트와 스킬 지시를 대체. `{percent}`, `{threshold}`가 채워짐 |
 | `resumePrompt` | 비어 있음 | 비운 뒤 제출하는 내장 프롬프트를 대체 |
+| `pauseRemoteControl` | 켜짐 | 비우는 동안 Remote Control을 끄고 재개 후 다시 켬. 끄면 Remote Control 중인 세션은 비우지 않음 |
 
 터미널 세션에서는 `/plugin configure context-handoff@claude-mod-repo`로 바꾸거나, 설치할 때 넘깁니다.
 

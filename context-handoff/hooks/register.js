@@ -1,4 +1,4 @@
-// The mod's name, as toasts and the hand-off prompts carry it
+// The mod's name, as toasts, log lines and the hand-off prompts carry it
 const NAME = 'context-handoff'
 // A tag every prompt this mod submits carries, so its own turn can be told apart
 const MARK = '[context-handoff]'
@@ -16,6 +16,10 @@ let closeTurnId = null
 let triggeredAt = null
 // The fallback that submits the resume prompt when no SessionStart follows the clear
 let resumeTimer = null
+// True while Remote Control is turned off for the clear, to be turned on again after the resume
+let remoteControlPaused = false
+// The last thing that happened, for /handoff-status
+let lastOutcome = 'nothing yet'
 
 // A number option, or its default when unset or out of range
 function numberOf(value, fallback, min, max) {
@@ -32,6 +36,7 @@ function settingsOf(options) {
     closeCommand: String(options.closeCommand ?? 'session-close').trim().replace(/^\//, ''),
     closePrompt: String(options.closePrompt ?? '').trim(),
     resumePrompt: String(options.resumePrompt ?? '').trim(),
+    pauseRemoteControl: options.pauseRemoteControl !== false,
   }
 }
 
@@ -89,6 +94,12 @@ function textOf(result) {
     .trim()
 }
 
+// Keep what happened: a dim line in the transcript, and the answer of /handoff-status
+function note($, text) {
+  lastOutcome = text
+  $.ui.log(`${NAME}: ${text}`)
+}
+
 // How full the context window is, in percent; null before the first reading
 async function readPercent($) {
   try {
@@ -117,6 +128,24 @@ async function hasCommand($, name) {
   }
 }
 
+// One call on the desktop app's session server. Resolves to null when it succeeded, else to why not.
+async function callApp($, tool, args) {
+  try {
+    const result = await $.mcp.call('ccd_session_mgmt', tool, args)
+    return result.isError ? textOf(result) || 'no reason given' : null
+  } catch (error) {
+    return messageOf(error)
+  }
+}
+
+// Turn Remote Control on again after it was turned off for the clear
+async function restoreRemoteControl($) {
+  if (!remoteControlPaused) return
+  remoteControlPaused = false
+  const failed = await callApp($, 'set_remote_control', { session_id: 'self', enabled: true })
+  note($, failed ? `Remote Control could not be turned on again: ${failed}` : 'Remote Control turned on again')
+}
+
 function cancelResumeTimer() {
   if (resumeTimer) resumeTimer.cancel()
   resumeTimer = null
@@ -128,7 +157,9 @@ function abandon($, reason) {
   closeText = null
   closeTurnId = null
   cancelResumeTimer()
+  note($, `gave up: ${reason}`)
   $.ui.toast(`${NAME}: ${reason}. /handoff-now retries.`, { timeoutMs: 8000 })
+  void restoreRemoteControl($)
 }
 
 // Submit the hand-off prompt; its turn is found by the tag at turn.start
@@ -138,6 +169,7 @@ async function begin($, cfg, percent, why) {
   triggeredAt = percent
   const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand))
   closeText = text
+  note($, `hand-off started: ${why}`)
   $.ui.toast(`${NAME}: ${why}, recording the hand-off`)
   $.prompt
     .submit({ text, asUser: true })
@@ -151,16 +183,22 @@ async function begin($, cfg, percent, why) {
     })
 }
 
-// Ask the desktop app to clear this conversation once the turn ends
-async function requestClear($) {
+// Ask the desktop app to clear this conversation once the turn ends. A session serving
+// Remote Control cannot be cleared, so Remote Control is turned off for it when allowed.
+async function requestClear($, cfg) {
   phase = 'clearing'
-  let result
-  try {
-    result = await $.mcp.call('ccd_session_mgmt', 'clear_session', { session_id: 'self' })
-  } catch (error) {
-    return abandon($, `could not clear the context: ${messageOf(error)}`)
+  let refused = await callApp($, 'clear_session', { session_id: 'self' })
+  if (refused && cfg.pauseRemoteControl && /remote control/i.test(refused)) {
+    const failed = await callApp($, 'set_remote_control', { session_id: 'self', enabled: false })
+    if (failed) {
+      return abandon($, `the app refused to clear the context: ${refused}; Remote Control could not be turned off: ${failed}`)
+    }
+    remoteControlPaused = true
+    note($, 'Remote Control turned off for the clear; it is turned on again after the resume')
+    refused = await callApp($, 'clear_session', { session_id: 'self' })
   }
-  if (result.isError) return abandon($, `the app refused to clear the context: ${textOf(result) || 'no reason given'}`)
+  if (refused) return abandon($, `the app refused to clear the context: ${refused}`)
+  note($, 'hand-off recorded, clearing the context')
   $.ui.toast(`${NAME}: hand-off recorded, clearing the context`)
 }
 
@@ -172,6 +210,7 @@ function submitResume($, cfg) {
   closeTurnId = null
   triggeredAt = null
   cancelResumeTimer()
+  note($, 'continuing in a fresh context')
   $.ui.toast(`${NAME}: continuing in a fresh context`)
   $.prompt.submit({ text: resumePromptFor(cfg), asUser: true }).catch(() => {})
 }
@@ -185,6 +224,10 @@ export function register(on, options) {
       name: 'handoff-now',
       description: 'Record a hand-off now, clear the context, and continue from the notes',
     })
+    await $.command.register({
+      name: 'handoff-status',
+      description: 'Show where the automatic hand-off stands and what it did last',
+    })
     return next(e)
   })
 
@@ -192,6 +235,7 @@ export function register(on, options) {
   on('turn.start', async ($, e, next) => {
     if (phase === 'closing' && closeTurnId === null && typeof e.text === 'string' && e.text.includes(MARK)) {
       closeTurnId = e.turnId
+      note($, 'the hand-off turn is running')
     }
     return next(e)
   })
@@ -205,7 +249,7 @@ export function register(on, options) {
     if (phase === 'closing') {
       // Another turn ran first: the hand-off prompt is still queued behind it
       if (e.turnId !== closeTurnId) return out
-      if (ended === 'answer') await requestClear($)
+      if (ended === 'answer') await requestClear($, cfg)
       else abandon($, `the hand-off turn ended early (${ended})`)
       return out
     }
@@ -217,7 +261,10 @@ export function register(on, options) {
       }
       return out
     }
-    if (phase !== 'idle' || !cfg.enabled || ended !== 'answer') return out
+    if (phase !== 'idle') return out
+    // The resume turn has run: the session may serve Remote Control again
+    await restoreRemoteControl($)
+    if (!cfg.enabled || ended !== 'answer') return out
 
     const percent = await readPercent($)
     if (percent === null || percent < cfg.threshold) return out
@@ -260,6 +307,16 @@ export function register(on, options) {
       text:
         `Recording the hand-off at ${Math.round(percent)}% context. ` +
         'Once it is written the context is cleared and a new conversation continues from the notes.',
+    }
+  })
+
+  on('command.run', { command: 'handoff-status' }, async ($) => {
+    const percent = await readPercent($)
+    const fill = percent === null ? 'no reading yet' : `${Math.round(percent)}%`
+    return {
+      text:
+        `Phase: ${phase}. Context: ${fill} (threshold ${cfg.threshold}%). ` +
+        `Automatic hand-off: ${cfg.enabled ? 'on' : 'off'}. Last: ${lastOutcome}.`,
     }
   })
 }

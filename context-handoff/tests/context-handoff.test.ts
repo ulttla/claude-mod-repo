@@ -11,10 +11,17 @@ const turn = (turnId: string, reason: 'answer' | 'aborted' | 'error' = 'answer')
 // What the session's context looks like at `percent` full
 type Context = { percent: number }
 
-// Wires the engine beneath the mod and records what the mod submits and calls
-function wire($: Engine, on: On, context: Context, commands: string[] = [], mcp: unknown = CLEARED) {
+// One call the mod made on the app's session server
+type AppCall = { server: string; tool: string; args?: Record<string, unknown> }
+
+// What the app answers: one answer for every call, or one per call
+type AppAnswer = unknown | ((call: AppCall) => unknown)
+
+// Wires the engine beneath the mod and records what the mod submits, calls and logs
+function wire($: Engine, on: On, context: Context, commands: string[] = [], app: AppAnswer = CLEARED) {
   const submitted: string[] = []
-  const calls: unknown[] = []
+  const calls: AppCall[] = []
+  const logged: string[] = []
   const clock = mock.clock(on)
   on('session.usage', () => ({
     value: {
@@ -34,8 +41,9 @@ function wire($: Engine, on: On, context: Context, commands: string[] = [], mcp:
     return { text: e.text, origin: e.origin }
   })
   on('mcp.call', ($, e) => {
-    calls.push(e)
-    return mcp
+    const call = e as AppCall
+    calls.push(call)
+    return typeof app === 'function' ? app(call) : app
   })
   on('session.start', () => ({ cwd: '/work' }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -43,12 +51,19 @@ function wire($: Engine, on: On, context: Context, commands: string[] = [], mcp:
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', () => ({}))
   on('ui.toast', () => ({ value: undefined }))
-  return { submitted, calls, clock }
+  on('ui.log', ($, e) => {
+    logged.push(e.text)
+    return { value: undefined }
+  })
+  return { submitted, calls, logged, clock }
 }
+
+// The clear calls among what the mod called
+const clears = (calls: AppCall[]) => calls.filter((call) => call.tool === 'clear_session')
 
 test('past the threshold the mod records a hand-off, clears, and resumes in the fresh conversation', async ($, on) => {
   const context = { percent: 45 }
-  const { submitted, calls } = wire($, on, context)
+  const { submitted, calls, logged } = wire($, on, context)
 
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'fix the build' })
@@ -80,6 +95,14 @@ test('past the threshold the mod records a hand-off, clears, and resumes in the 
   await $.turn.complete(turn('t3'))
   expect(submitted.length).toBe(2)
   expect(calls.length).toBe(1)
+
+  // Each step left a line in the transcript
+  expect(logged).toEqual([
+    'context-handoff: hand-off started: context at 45%, past 40%',
+    'context-handoff: the hand-off turn is running',
+    'context-handoff: hand-off recorded, clearing the context',
+    'context-handoff: continuing in a fresh context',
+  ])
 })
 
 test('below the threshold nothing happens', async ($, on) => {
@@ -112,16 +135,17 @@ test('a turn the user ran before the hand-off turn is left alone', async ($, on)
 
 test('an interrupted hand-off is given up, and tried again once the context grew by the step', async ($, on) => {
   const context = { percent: 41 }
-  const { submitted, calls } = wire($, on, context)
+  const { submitted, calls, logged } = wire($, on, context)
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
   await $.turn.complete(turn('t1'))
   expect(submitted.length).toBe(1)
 
-  // The user interrupts the hand-off turn: nothing is cleared
+  // The user interrupts the hand-off turn: nothing is cleared, and the transcript says why
   await $.turn.start({ turnId: 't2', text: submitted[0] })
   await $.turn.complete(turn('t2', 'aborted'))
   expect(calls.length).toBe(0)
+  expect(logged.at(-1)).toBe('context-handoff: gave up: the hand-off turn ended early (aborted)')
 
   // Still over the threshold, but not by the step: no new hand-off
   context.percent = 44
@@ -158,17 +182,73 @@ test('a turn that runs after the clear was asked for records the hand-off again'
 })
 
 test('a clear the app refuses is reported and given up', async ($, on) => {
-  const REFUSED = { value: { content: [{ type: 'text', text: 'session is pinned' }], isError: true } }
-  const { submitted } = wire($, on, { percent: 45 }, [], REFUSED)
+  const REFUSED = { value: { content: [{ type: 'text', text: 'the session is still working' }], isError: true } }
+  const { submitted, calls, logged } = wire($, on, { percent: 45 }, [], REFUSED)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't1', text: 'hello' })
+  await $.turn.complete(turn('t1'))
+  await $.turn.start({ turnId: 't2', text: submitted[0] })
+  await $.turn.complete(turn('t2'))
+  expect(logged.at(-1)).toBe('context-handoff: gave up: the app refused to clear the context: the session is still working')
+
+  // No Remote Control change for a refusal that is not about it, and no resume prompt
+  expect(calls.length).toBe(1)
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(submitted.length).toBe(1)
+})
+
+test('a session serving Remote Control has it turned off for the clear, and on again after the resume', async ($, on) => {
+  let remoteControl = 'on'
+  const app = (call: AppCall) => {
+    if (call.tool === 'set_remote_control') {
+      remoteControl = call.args?.enabled ? 'on' : 'off'
+      return { value: { content: [{ type: 'text', text: remoteControl }], isError: false } }
+    }
+    return remoteControl === 'on'
+      ? { value: { content: [{ type: 'text', text: 'a session serving a Remote Control client cannot be cleared' }], isError: true } }
+      : CLEARED
+  }
+  const context = { percent: 45 }
+  const { submitted, calls, logged } = wire($, on, context, [], app)
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
   await $.turn.complete(turn('t1'))
   await $.turn.start({ turnId: 't2', text: submitted[0] })
   await $.turn.complete(turn('t2'))
 
-  // No clear happened, so no resume prompt follows
+  // Refused once, Remote Control turned off, cleared on the second try
+  expect(calls.map((call) => [call.tool, call.args?.enabled])).toEqual([
+    ['clear_session', undefined],
+    ['set_remote_control', false],
+    ['clear_session', undefined],
+  ])
+  expect(logged).toContain('context-handoff: Remote Control turned off for the clear; it is turned on again after the resume')
+  expect(logged.at(-1)).toBe('context-handoff: hand-off recorded, clearing the context')
+
+  // The fresh conversation resumes; once its first turn has run, Remote Control is turned on again
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
   await $.classic.SessionStart({ source: 'clear' })
-  expect(submitted.length).toBe(1)
+  expect(submitted.length).toBe(2)
+  expect(remoteControl).toBe('off')
+  context.percent = 3
+  await $.turn.start({ turnId: 't3', text: submitted[1] })
+  await $.turn.complete(turn('t3'))
+  expect(remoteControl).toBe('on')
+  expect(logged.at(-1)).toBe('context-handoff: Remote Control turned on again')
+  expect(clears(calls).length).toBe(2)
+})
+
+test('with pauseRemoteControl off, a Remote Control refusal is given up like any other', { options: { pauseRemoteControl: false } }, async ($, on) => {
+  const REFUSED = {
+    value: { content: [{ type: 'text', text: 'a session serving a Remote Control client cannot be cleared' }], isError: true },
+  }
+  const { submitted, calls } = wire($, on, { percent: 45 }, [], REFUSED)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't1', text: 'hello' })
+  await $.turn.complete(turn('t1'))
+  await $.turn.start({ turnId: 't2', text: submitted[0] })
+  await $.turn.complete(turn('t2'))
+  expect(calls.map((call) => call.tool)).toEqual(['clear_session'])
 })
 
 test("the project's close skill is run when the project has it", async ($, on) => {
@@ -184,7 +264,7 @@ test("the project's close skill is run when the project has it", async ($, on) =
 })
 
 test(
-  'the options set the threshold, the close skill and the prompts, and turn the automatic hand-off off',
+  'the options set the threshold, the close skill and the prompts',
   { options: { threshold: 20, closeCommand: '/wrap-up', closePrompt: 'Close at {percent}% ({threshold}%)', resumePrompt: 'Go on' } },
   async ($, on) => {
     const { submitted, calls } = wire($, on, { percent: 25 }, ['wrap-up'])
@@ -226,6 +306,20 @@ test('with the automatic hand-off off, only /handoff-now hands off', { options: 
   await $.turn.start({ turnId: 't2', text: submitted[0] })
   await $.turn.complete(turn('t2'))
   expect(calls.length).toBe(1)
+})
+
+test('/handoff-status tells the phase, the context and what happened last', async ($, on) => {
+  const { submitted } = wire($, on, { percent: 45 })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const before = await $.command.run({ command: 'handoff-status' })
+  expect(before.text).toBe('Phase: idle. Context: 45% (threshold 40%). Automatic hand-off: on. Last: nothing yet.')
+
+  await $.turn.start({ turnId: 't1', text: 'hello' })
+  await $.turn.complete(turn('t1'))
+  expect(submitted.length).toBe(1)
+  const during = await $.command.run({ command: 'handoff-status' })
+  expect(during.text).toContain('Phase: closing.')
+  expect(during.text).toContain('Last: hand-off started: context at 45%, past 40%.')
 })
 
 test('when no SessionStart follows the clear, the resume prompt is submitted by the timer', async ($, on) => {
