@@ -4,8 +4,6 @@ const NAME = 'context-handoff'
 const MARK = '[context-handoff]'
 // The store key that survives the desktop app's clear, which ends the process
 const RESUME_KEY = 'pendingResume'
-// How long a pending resume in the store stays valid
-const RESUME_WINDOW_MS = 15 * 60 * 1000
 // How long the app gets to clear the conversation once the hand-off turn has ended
 const CLEAR_WAIT_MS = 8000
 // When the compaction is tried after the hand-off turn: it is refused while a turn still runs
@@ -382,7 +380,8 @@ function submitResume($, cfg) {
 }
 
 // A fresh process after the app's clear: when the store says this session's hand-off asked
-// for a resume, and no prompt has run yet, continue from the notes
+// for a resume, and no prompt has run yet, continue from the notes. The app starts that process
+// at the user's next message, however long after the clear, so the resume keeps until then
 async function resumeIfPending($, cfg) {
   let pending
   try {
@@ -393,7 +392,6 @@ async function resumeIfPending($, cfg) {
   if (!pending || typeof pending !== 'object') return
   const forget = () => forgetPendingResume($)
   if ((await $.session.turns()) !== 0) return forget()
-  if (typeof pending.askedAt !== 'number' || (await $.clock.now()) - pending.askedAt > RESUME_WINDOW_MS) return forget()
   const id = await appSessionId($)
   const isThisSession =
     id && pending.appSessionId ? id === pending.appSessionId : (await $.session.cwd()) === pending.cwd

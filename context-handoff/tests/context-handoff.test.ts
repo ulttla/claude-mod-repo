@@ -556,7 +556,7 @@ test("a stored resume of another session, or of a conversation that already ran,
   expect(other.store.pendingResume).toBeDefined()
 })
 
-test('a stored resume is dropped once prompts have run or it is too old', CLEAR, async ($, on) => {
+test('a stored resume is dropped once prompts have run', CLEAR, async ($, on) => {
   const { submitted, store, clock } = wire($, on, { percent: 0 }, {
     turns: 3,
     store: { pendingResume: { appSessionId: 'local_a', cwd: '/work', askedAt: 0 } },
