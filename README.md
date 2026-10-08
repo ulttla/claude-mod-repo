@@ -129,7 +129,7 @@ A long session gets worse as its context fills up. This mod hands the work over 
 After each turn it reads how full the context window is. Past the threshold (40% by default), it:
 
 1. Submits a prompt that has Claude record a hand-off. When the project has a `session-close` skill, Claude is told to run it; otherwise Claude follows the session-close procedure in the project's `CLAUDE.md`, or updates `PROGRESS.md`, or writes `HANDOFF.md` at the project root.
-2. When that turn ends, asks the Desktop app to clear the conversation (the same as `/clear`). The session keeps its row in the sidebar, and the old conversation stays available under **Resume previous session**.
+2. As that turn starts, asks the Desktop app to clear the conversation when the turn ends (the same as `/clear`). The session keeps its row in the sidebar, and the old conversation stays available under **Resume previous session**. If the app has not cleared it within eight seconds of the turn ending, the mod gives up and says so.
 3. In the fresh conversation, submits a prompt that has Claude read the notes and continue from the recorded next step.
 
 Each step shows a toast. A message you had already queued runs first; if one runs after the clear was asked for, the notes are recorded again so nothing is lost. If you interrupt the hand-off turn, or the app refuses the clear, the mod gives up, says why, and tries again once the context has grown by another 5 points.
@@ -300,7 +300,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 턴이 끝날 때마다 컨텍스트 창이 얼마나 찼는지 읽고, 임계값(기본 40%)을 넘으면 다음을 차례로 합니다.
 
 1. Claude가 인계 기록을 쓰도록 프롬프트를 제출합니다. 프로젝트에 `session-close` 스킬이 있으면 그 스킬을 실행하라고 지시하고, 없으면 프로젝트 `CLAUDE.md`의 세션 종료 절차를 따르거나, `PROGRESS.md`를 갱신하거나, 프로젝트 루트에 `HANDOFF.md`를 씁니다.
-2. 그 턴이 끝나면 데스크톱 앱에 대화를 비우라고 요청합니다(`/clear`와 같음). 세션은 사이드바의 같은 행에 남고, 이전 대화는 **Resume previous session**으로 되돌릴 수 있습니다.
+2. 그 턴이 시작될 때 데스크톱 앱에 "이 턴이 끝나면 대화를 비워 달라"고 요청합니다(`/clear`와 같음). 세션은 사이드바의 같은 행에 남고, 이전 대화는 **Resume previous session**으로 되돌릴 수 있습니다. 턴이 끝나고 8초 안에 비워지지 않으면 포기하고 알립니다.
 3. 새 대화에서 Claude가 기록을 읽고 기록된 다음 시작점부터 이어가도록 프롬프트를 제출합니다.
 
 단계마다 토스트로 알립니다. 이미 대기 중이던 메시지가 있으면 그것이 먼저 실행되고, 비우기 요청 뒤에 턴이 실행되면 기록을 다시 써서 빠지는 내용이 없게 합니다. 인계 턴을 중단하거나 앱이 비우기를 거부하면 포기하고 이유를 알린 뒤, 컨텍스트가 5포인트 더 차면 다시 시도합니다.

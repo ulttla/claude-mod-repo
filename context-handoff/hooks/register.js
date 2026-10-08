@@ -16,6 +16,10 @@ let closeTurnId = null
 let triggeredAt = null
 // The fallback that submits the resume prompt when no SessionStart follows the clear
 let resumeTimer = null
+// Gives up when the app has not cleared the conversation soon after the hand-off turn ended
+let clearWatchdog = null
+// How long the app gets to clear the conversation once the hand-off turn has ended
+const CLEAR_WAIT_MS = 8000
 // True while Remote Control is turned off for the clear, to be turned on again after the resume
 let remoteControlPaused = false
 // The last thing that happened, for /handoff-status
@@ -151,12 +155,18 @@ function cancelResumeTimer() {
   resumeTimer = null
 }
 
+function cancelClearWatchdog() {
+  if (clearWatchdog) clearWatchdog.cancel()
+  clearWatchdog = null
+}
+
 // Give up the hand-off in progress and say why; the next tries once the context grew by the step
 function abandon($, reason) {
   phase = 'idle'
   closeText = null
   closeTurnId = null
   cancelResumeTimer()
+  cancelClearWatchdog()
   note($, `gave up: ${reason}`)
   $.ui.toast(`${NAME}: ${reason}. /handoff-now retries.`, { timeoutMs: 8000 })
   void restoreRemoteControl($)
@@ -167,6 +177,7 @@ async function begin($, cfg, percent, why) {
   phase = 'closing'
   closeTurnId = null
   triggeredAt = percent
+  cancelClearWatchdog()
   const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand))
   closeText = text
   note($, `hand-off started: ${why}`)
@@ -183,8 +194,10 @@ async function begin($, cfg, percent, why) {
     })
 }
 
-// Ask the desktop app to clear this conversation once the turn ends. A session serving
-// Remote Control cannot be cleared, so Remote Control is turned off for it when allowed.
+// Ask the desktop app to clear this conversation once the running turn ends. The app keeps
+// the request only while the turn runs and acts on it as the turn's result arrives, so it is
+// made as the hand-off turn starts. A session started from another device (Remote Control)
+// cannot be cleared, so Remote Control is turned off for it when allowed.
 async function requestClear($, cfg) {
   phase = 'clearing'
   let refused = await callApp($, 'clear_session', { session_id: 'self' })
@@ -198,8 +211,20 @@ async function requestClear($, cfg) {
     refused = await callApp($, 'clear_session', { session_id: 'self' })
   }
   if (refused) return abandon($, `the app refused to clear the context: ${refused}`)
-  note($, 'hand-off recorded, clearing the context')
+  note($, 'the app will clear the conversation when the hand-off turn ends')
+}
+
+// The hand-off turn has ended: the app clears the conversation now, or the hand-off is given up
+function awaitClear($) {
+  note($, 'hand-off recorded, waiting for the app to clear the conversation')
   $.ui.toast(`${NAME}: hand-off recorded, clearing the context`)
+  cancelClearWatchdog()
+  clearWatchdog = $.clock.after(CLEAR_WAIT_MS, () => {
+    clearWatchdog = null
+    if (phase === 'clearing') {
+      abandon($, `the app did not clear the conversation within ${CLEAR_WAIT_MS / 1000} s of the hand-off turn ending`)
+    }
+  })
 }
 
 // Submit the resume prompt into the fresh conversation, once
@@ -210,6 +235,7 @@ function submitResume($, cfg) {
   closeTurnId = null
   triggeredAt = null
   cancelResumeTimer()
+  cancelClearWatchdog()
   note($, 'continuing in a fresh context')
   $.ui.toast(`${NAME}: continuing in a fresh context`)
   $.prompt.submit({ text: resumePromptFor(cfg), asUser: true }).catch(() => {})
@@ -231,11 +257,13 @@ export function register(on, options) {
     return next(e)
   })
 
-  // The turn that runs the hand-off prompt is the one whose text carries the tag
+  // The turn that runs the hand-off prompt is the one whose text carries the tag. The clear is
+  // asked for as it starts, so the app clears the conversation as this turn ends.
   on('turn.start', async ($, e, next) => {
     if (phase === 'closing' && closeTurnId === null && typeof e.text === 'string' && e.text.includes(MARK)) {
       closeTurnId = e.turnId
       note($, 'the hand-off turn is running')
+      await requestClear($, cfg)
     }
     return next(e)
   })
@@ -246,16 +274,15 @@ export function register(on, options) {
     if (e.agentId !== undefined) return out
     const ended = e.reason ?? (e.isAborted ? 'aborted' : 'answer')
 
-    if (phase === 'closing') {
-      // Another turn ran first: the hand-off prompt is still queued behind it
-      if (e.turnId !== closeTurnId) return out
-      if (ended === 'answer') await requestClear($, cfg)
-      else abandon($, `the hand-off turn ended early (${ended})`)
-      return out
-    }
+    // The hand-off prompt is still queued, behind the turn that just ran
+    if (phase === 'closing') return out
     if (phase === 'clearing') {
-      // A turn ran after the clear was asked for, so the app dropped the clear: record again
-      if (ended === 'answer') {
+      if (e.turnId === closeTurnId) {
+        // An interrupted hand-off turn takes the app's queued clear with it
+        if (ended === 'aborted') abandon($, 'the hand-off turn was interrupted')
+        else awaitClear($)
+      } else if (ended === 'answer') {
+        // A turn ran after the hand-off, so the app dropped the clear: record again
         const percent = (await readPercent($)) ?? triggeredAt ?? cfg.threshold
         await begin($, cfg, percent, 'a turn ran before the clear')
       }
@@ -277,11 +304,13 @@ export function register(on, options) {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' && phase === 'clearing') {
       phase = 'resuming'
+      cancelClearWatchdog()
       cancelResumeTimer()
       resumeTimer = $.clock.after(3000, () => submitResume($, cfg))
     } else if (e.reason !== 'clear') {
       phase = 'idle'
       cancelResumeTimer()
+      cancelClearWatchdog()
     }
     return next(e)
   })

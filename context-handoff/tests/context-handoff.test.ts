@@ -61,7 +61,7 @@ function wire($: Engine, on: On, context: Context, commands: string[] = [], app:
 // The clear calls among what the mod called
 const clears = (calls: AppCall[]) => calls.filter((call) => call.tool === 'clear_session')
 
-test('past the threshold the mod records a hand-off, clears, and resumes in the fresh conversation', async ($, on) => {
+test('past the threshold the mod records a hand-off, has the app clear as that turn ends, and resumes', async ($, on) => {
   const context = { percent: 45 }
   const { submitted, calls, logged } = wire($, on, context)
 
@@ -69,17 +69,18 @@ test('past the threshold the mod records a hand-off, clears, and resumes in the 
   await $.turn.start({ turnId: 't1', text: 'fix the build' })
   await $.turn.complete(turn('t1'))
 
-  // The hand-off prompt is submitted, and nothing is cleared yet
+  // The hand-off prompt is submitted, and nothing is asked of the app yet
   expect(submitted.length).toBe(1)
   expect(submitted[0]).toContain('[context-handoff]')
   expect(submitted[0]).toContain('45% full, past the 40%')
   expect(submitted[0]).toContain('HANDOFF.md')
   expect(calls.length).toBe(0)
 
-  // The hand-off turn runs and ends: the clear is asked for
+  // As the hand-off turn starts, the app is asked to clear the conversation when it ends
   await $.turn.start({ turnId: 't2', text: submitted[0] })
-  await $.turn.complete(turn('t2'))
   expect(calls).toEqual([{ server: 'ccd_session_mgmt', tool: 'clear_session', args: { session_id: 'self' } }])
+  await $.turn.complete(turn('t2'))
+  expect(calls.length).toBe(1)
   expect(submitted.length).toBe(1)
 
   // The conversation ends with the clear, and the fresh one begins: the resume prompt is submitted once
@@ -100,7 +101,8 @@ test('past the threshold the mod records a hand-off, clears, and resumes in the 
   expect(logged).toEqual([
     'context-handoff: hand-off started: context at 45%, past 40%',
     'context-handoff: the hand-off turn is running',
-    'context-handoff: hand-off recorded, clearing the context',
+    'context-handoff: the app will clear the conversation when the hand-off turn ends',
+    'context-handoff: hand-off recorded, waiting for the app to clear the conversation',
     'context-handoff: continuing in a fresh context',
   ])
 })
@@ -127,9 +129,8 @@ test('a turn the user ran before the hand-off turn is left alone', async ($, on)
   expect(calls.length).toBe(0)
   expect(submitted.length).toBe(1)
 
-  // Then the hand-off turn runs
+  // Then the hand-off turn starts, and the clear is asked for
   await $.turn.start({ turnId: 't3', text: submitted[0] })
-  await $.turn.complete(turn('t3'))
   expect(calls.length).toBe(1)
 })
 
@@ -141,11 +142,11 @@ test('an interrupted hand-off is given up, and tried again once the context grew
   await $.turn.complete(turn('t1'))
   expect(submitted.length).toBe(1)
 
-  // The user interrupts the hand-off turn: nothing is cleared, and the transcript says why
+  // The user interrupts the hand-off turn, which takes the app's queued clear with it
   await $.turn.start({ turnId: 't2', text: submitted[0] })
+  expect(calls.length).toBe(1)
   await $.turn.complete(turn('t2', 'aborted'))
-  expect(calls.length).toBe(0)
-  expect(logged.at(-1)).toBe('context-handoff: gave up: the hand-off turn ended early (aborted)')
+  expect(logged.at(-1)).toBe('context-handoff: gave up: the hand-off turn was interrupted')
 
   // Still over the threshold, but not by the step: no new hand-off
   context.percent = 44
@@ -160,7 +161,7 @@ test('an interrupted hand-off is given up, and tried again once the context grew
   expect(submitted.length).toBe(2)
 })
 
-test('a turn that runs after the clear was asked for records the hand-off again', async ($, on) => {
+test('a turn that runs after the hand-off turn records the hand-off again', async ($, on) => {
   const { submitted, calls } = wire($, on, { percent: 45 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
@@ -175,24 +176,47 @@ test('a turn that runs after the clear was asked for records the hand-off again'
   expect(submitted.length).toBe(2)
   expect(submitted[1]).toContain('[context-handoff]')
 
-  // And the second hand-off turn leads to a clear again
+  // And the second hand-off turn asks for a clear again
   await $.turn.start({ turnId: 't4', text: submitted[1] })
-  await $.turn.complete(turn('t4'))
   expect(calls.length).toBe(2)
 })
 
-test('a clear the app refuses is reported and given up', async ($, on) => {
-  const REFUSED = { value: { content: [{ type: 'text', text: 'the session is still working' }], isError: true } }
-  const { submitted, calls, logged } = wire($, on, { percent: 45 }, [], REFUSED)
+test('when the app does not clear the conversation after the hand-off turn, the mod gives up', async ($, on) => {
+  const { submitted, logged, clock } = wire($, on, { percent: 45 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
   await $.turn.complete(turn('t1'))
   await $.turn.start({ turnId: 't2', text: submitted[0] })
   await $.turn.complete(turn('t2'))
-  expect(logged.at(-1)).toBe('context-handoff: gave up: the app refused to clear the context: the session is still working')
+  expect(logged.at(-1)).toBe('context-handoff: hand-off recorded, waiting for the app to clear the conversation')
 
-  // No Remote Control change for a refusal that is not about it, and no resume prompt
+  // Nothing happens for eight seconds
+  await clock.advance(7999)
+  expect(logged.at(-1)).toBe('context-handoff: hand-off recorded, waiting for the app to clear the conversation')
+  await clock.advance(1)
+  expect(logged.at(-1)).toBe(
+    'context-handoff: gave up: the app did not clear the conversation within 8 s of the hand-off turn ending',
+  )
+  const { text } = await $.command.run({ command: 'handoff-status' })
+  expect(text).toContain('Phase: idle.')
+
+  // A SessionStart arriving now is not a resume
+  await $.classic.SessionStart({ source: 'clear' })
+  expect(submitted.length).toBe(1)
+})
+
+test('a clear the app refuses is reported and given up', async ($, on) => {
+  const REFUSED = { value: { content: [{ type: 'text', text: 'a message the user sent is waiting' }], isError: true } }
+  const { submitted, calls, logged } = wire($, on, { percent: 45 }, [], REFUSED)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't1', text: 'hello' })
+  await $.turn.complete(turn('t1'))
+  await $.turn.start({ turnId: 't2', text: submitted[0] })
+  expect(logged.at(-1)).toBe('context-handoff: gave up: the app refused to clear the context: a message the user sent is waiting')
+
+  // No Remote Control change for a refusal that is not about it, and the hand-off turn ends as any other
   expect(calls.length).toBe(1)
+  await $.turn.complete(turn('t2'))
   await $.classic.SessionStart({ source: 'clear' })
   expect(submitted.length).toBe(1)
 })
@@ -205,7 +229,7 @@ test('a session serving Remote Control has it turned off for the clear, and on a
       return { value: { content: [{ type: 'text', text: remoteControl }], isError: false } }
     }
     return remoteControl === 'on'
-      ? { value: { content: [{ type: 'text', text: 'a session serving a Remote Control client cannot be cleared' }], isError: true } }
+      ? { value: { content: [{ type: 'text', text: "This session can't be cleared right now: it is serving a Remote Control client." }], isError: true } }
       : CLEARED
   }
   const context = { percent: 45 }
@@ -214,16 +238,16 @@ test('a session serving Remote Control has it turned off for the clear, and on a
   await $.turn.start({ turnId: 't1', text: 'hello' })
   await $.turn.complete(turn('t1'))
   await $.turn.start({ turnId: 't2', text: submitted[0] })
-  await $.turn.complete(turn('t2'))
 
-  // Refused once, Remote Control turned off, cleared on the second try
+  // Refused once, Remote Control turned off, queued on the second try
   expect(calls.map((call) => [call.tool, call.args?.enabled])).toEqual([
     ['clear_session', undefined],
     ['set_remote_control', false],
     ['clear_session', undefined],
   ])
   expect(logged).toContain('context-handoff: Remote Control turned off for the clear; it is turned on again after the resume')
-  expect(logged.at(-1)).toBe('context-handoff: hand-off recorded, clearing the context')
+  expect(logged.at(-1)).toBe('context-handoff: the app will clear the conversation when the hand-off turn ends')
+  await $.turn.complete(turn('t2'))
 
   // The fresh conversation resumes; once its first turn has run, Remote Control is turned on again
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
@@ -247,7 +271,6 @@ test('with pauseRemoteControl off, a Remote Control refusal is given up like any
   await $.turn.start({ turnId: 't1', text: 'hello' })
   await $.turn.complete(turn('t1'))
   await $.turn.start({ turnId: 't2', text: submitted[0] })
-  await $.turn.complete(turn('t2'))
   expect(calls.map((call) => call.tool)).toEqual(['clear_session'])
 })
 
@@ -275,8 +298,8 @@ test(
     expect(submitted).toEqual(['[context-handoff] Close at 25% (20%)'])
 
     await $.turn.start({ turnId: 't2', text: submitted[0] })
-    await $.turn.complete(turn('t2'))
     expect(calls.length).toBe(1)
+    await $.turn.complete(turn('t2'))
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
     await $.classic.SessionStart({ source: 'clear' })
     expect(submitted[1]).toBe('[context-handoff] Go on')
@@ -304,7 +327,6 @@ test('with the automatic hand-off off, only /handoff-now hands off', { options: 
   expect(submitted[0]).toContain('90% full')
 
   await $.turn.start({ turnId: 't2', text: submitted[0] })
-  await $.turn.complete(turn('t2'))
   expect(calls.length).toBe(1)
 })
 

@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Past a context threshold, records a hand-off, clears the context, and continues from the notes in a fresh conversation",
   "author": {
     "name": "ulttla"
