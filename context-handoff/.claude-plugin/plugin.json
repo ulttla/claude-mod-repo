@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Past a context threshold, records a hand-off, resets the context (a compaction in place, through /compact where the session has no compaction call, or the desktop app's clear), and continues from the notes",
   "author": {
     "name": "ulttla"

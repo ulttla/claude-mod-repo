@@ -75,9 +75,13 @@ function fillIn(text, percent, cfg) {
 }
 
 // The prompt that records the hand-off: the project's own close skill when it has one,
-// a custom prompt when configured, or the built-in instructions
-function closePromptFor(cfg, percent, hasClose) {
-  const level = `The context window is ${Math.round(percent)}% full, past the ${cfg.threshold}% hand-off threshold.`
+// a custom prompt when configured, or the built-in instructions. It opens with why the
+// hand-off is made: the threshold passed, or /handoff-now asked for it, whatever the context holds
+function closePromptFor(cfg, percent, hasClose, asked) {
+  const fill = `The context window is ${Math.round(percent)}% full`
+  const level = asked
+    ? `${fill}; a hand-off was asked for with /handoff-now.`
+    : `${fill}, past the ${cfg.threshold}% hand-off threshold.`
   const pending =
     'If the previous turn stopped to ask the user something, put that question in the notes instead of answering it.'
   const then = 'the context is then reset automatically and the work continues from the notes.'
@@ -224,12 +228,12 @@ function abandon($, reason) {
 }
 
 // Submit the hand-off prompt; its turn is found by the tag at turn.start
-async function begin($, cfg, percent, why) {
+async function begin($, cfg, percent, why, asked = false) {
   phase = 'closing'
   closeTurnId = null
   triggeredAt = percent
   cancelTimers()
-  const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand))
+  const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), asked)
   closeText = text
   note($, `hand-off started: ${why}`)
   $.ui.toast(`${NAME}: ${why}, recording the hand-off`)
@@ -512,7 +516,7 @@ export function register(on, options) {
     phase = 'closing'
     $.clock.after(50, () => {
       phase = 'idle'
-      void begin($, cfg, percent, 'asked by /handoff-now')
+      void begin($, cfg, percent, 'asked by /handoff-now', true)
     })
     return {
       text:

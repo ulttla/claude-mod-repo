@@ -442,11 +442,13 @@ test('with the automatic hand-off off, only /handoff-now hands off', { options: 
   const again = await $.command.run({ command: 'handoff-now' })
   expect(again.text).toContain('already in progress')
 
-  // The prompt is submitted a moment after the command, once its run has ended
+  // The prompt is submitted a moment after the command, once its run has ended, and says
+  // the hand-off was asked for rather than that a threshold was passed
   expect(submitted.length).toBe(0)
   await clock.advance(50)
   expect(submitted.length).toBe(1)
-  expect(submitted[0]).toContain('90% full')
+  expect(submitted[0]).toContain('90% full; a hand-off was asked for with /handoff-now.')
+  expect(submitted[0].includes('threshold')).toBe(false)
 
   await $.turn.start({ turnId: 't2', text: submitted[0] })
   await $.turn.complete(turn('t2'))
