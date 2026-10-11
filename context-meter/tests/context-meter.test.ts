@@ -126,3 +126,36 @@ test(
     expect(text).toBe('main* · opus · Ctx 25% (50k/200k) · 5H 12% · $1.24')
   },
 )
+
+test(
+  'the effort shows once a model request of the session has carried one',
+  { options: { showEffort: true, showBranch: false, showLastTurn: false } },
+  async ($, on) => {
+    on('session.usage', () => ({
+      value: { startedAt: 0, context: { tokens: 50000, window: 200000, percent: 25 }, rateLimits: [] },
+    }))
+    on('command.register', () => ({ value: undefined }))
+    on('session.start', () => ({ cwd: '/work' }))
+    // Stands for the model's response to each request
+    on('turn.step', async function* ($, e) {
+      return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn', usage: null }
+    })
+    const line = async () => (await $.command.run({ command: 'context-meter' })).text
+    const step = { turnId: 't1', index: 0, model: 'opus', messageCount: 1 } as const
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    // No request has been made yet
+    expect(await line()).toBe('Ctx 25% (50k/200k)')
+
+    for await (const _ of $.turn.step({ ...step, effort: 'xhigh' }));
+    expect(await line()).toBe('Effort xhigh · Ctx 25% (50k/200k)')
+
+    // A subagent's request leaves the session's effort as it was
+    for await (const _ of $.turn.step({ ...step, index: 1, effort: 'low', agentId: 'a1' }));
+    expect(await line()).toBe('Effort xhigh · Ctx 25% (50k/200k)')
+
+    // A model that takes no effort
+    for await (const _ of $.turn.step({ ...step, index: 2, model: 'haiku' }));
+    expect(await line()).toBe('Ctx 25% (50k/200k)')
+  },
+)

@@ -97,6 +97,7 @@ Each segment can be turned on or off.
 | `showBranch` | on | The current git branch |
 | `showDirty` | off | A `*` after the branch name when the working tree has uncommitted changes, as in `main*`. Runs `git status` on each turn |
 | `showModel` | off | The session's model |
+| `showEffort` | off | The effort level the session's model requests ask for, as in `Effort xhigh`. Shown from the first response on, and left out on a model that takes no effort |
 | `showContext` | on | `Ctx`, the context window |
 | `showLastTurn` | on | `Last`, what the last turn added |
 | `showFiveHour` | on | `5H`, the five-hour plan limit |
@@ -270,6 +271,7 @@ main   Ctx 12% (119k/1M)   Last +119k   5H 1% ↻17:30   1W 25% ↻Wed 11:00
 | `showBranch` | 켜짐 | 현재 git 브랜치 |
 | `showDirty` | 꺼짐 | 커밋하지 않은 변경이 있으면 브랜치 이름 뒤에 `*` 표시 (예: `main*`). 턴마다 `git status`를 실행합니다 |
 | `showModel` | 꺼짐 | 세션의 모델 |
+| `showEffort` | 꺼짐 | 세션의 모델 요청에 적용된 effort 수준 (예: `Effort xhigh`). 첫 응답부터 표시되고, effort를 받지 않는 모델에서는 생략됩니다 |
 | `showContext` | 켜짐 | `Ctx`, 컨텍스트 창 |
 | `showLastTurn` | 켜짐 | `Last`, 직전 턴이 늘린 양 |
 | `showFiveHour` | 켜짐 | `5H`, 5시간 플랜 한도 |

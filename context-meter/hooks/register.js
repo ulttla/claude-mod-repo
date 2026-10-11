@@ -9,6 +9,8 @@ let lastDelta = null
 let branch = null
 // The session's model, as /model shows it
 let model = null
+// The effort the session's last model request asked for, null before the first one or on a model that takes none
+let effort = null
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -18,6 +20,7 @@ function shownSegments(options) {
     branch: options.showBranch !== false,
     dirty: options.showDirty === true,
     model: options.showModel === true,
+    effort: options.showEffort === true,
     context: options.showContext !== false,
     lastTurn: options.showLastTurn !== false,
     fiveHour: options.showFiveHour !== false,
@@ -79,6 +82,7 @@ function segments(shown, hasRoom, now) {
   const parts = []
   if (shown.branch && branch) parts.push({ text: branch })
   if (shown.model && model) parts.push({ text: model })
+  if (shown.effort && effort !== null) parts.push({ text: 'Effort ' + effort })
   if (shown.context) {
     // The fill is absent until the first response reports one
     const isFilled = typeof context.tokens === 'number'
@@ -170,6 +174,18 @@ export function register(on, options) {
     await measure($, shown)
     return next(e)
   })
+
+  // The effort is carried by each model request, so it is read there. A subagent's requests are left out.
+  if (shown.effort) {
+    on('turn.step', async function* ($, e, next) {
+      const asked = e.effort ?? null
+      if (!e.agentId && asked !== effort) {
+        effort = asked
+        $.ui.invalidate('ui.render')
+      }
+      return yield* next(e)
+    })
+  }
 
   // Fires after each turn, and when a plan limit's percent used changes
   on('session.measure', async ($, e, next) => {
