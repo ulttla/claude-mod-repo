@@ -14,7 +14,7 @@ A mod is a plugin that changes how Claude Code looks and behaves. This repositor
 | :- | :- | :- |
 | [`context-meter`](context-meter) | Shows the git branch, how full the context window is, how much the last turn added, and how much of your plan limits you have used, in a band above the prompt | Terminal and the Desktop app's Code tab |
 | [`auto-pin`](auto-pin) | Pins a new session in the sidebar as soon as it starts | The Desktop app's Code tab |
-| [`context-handoff`](context-handoff) | Once the context window is 40% full, has Claude write hand-off notes, resets the context, and continues from the notes | Terminal and the Desktop app's Code tab |
+| [`context-handoff`](context-handoff) | Once the context window is 40% full, has Claude write hand-off notes and continues from them in a new session (or after resetting the context) | Terminal and the Desktop app's Code tab |
 
 ### Requirements
 
@@ -130,13 +130,14 @@ A long session gets worse as its context fills up. This mod hands the work over 
 After each turn it reads how full the context window is. Past the threshold (40% by default), it:
 
 1. Submits a prompt that has Claude record a hand-off. When the project has a `session-close` skill, Claude is told to run it; otherwise Claude follows the session-close procedure in the project's `CLAUDE.md`, or updates `PROGRESS.md`, or writes `HANDOFF.md` at the project root.
-2. When that turn ends, resets the context. By default it compacts the conversation down to where the notes are and the next step (the same as `/compact` with instructions), so the process, model and settings stay as they were. In the Desktop app the session has no compaction call of its own, so the mod runs `/compact` with those instructions instead, as if you had typed it. With `reset` set to `clear`, it instead asks the Desktop app to clear the conversation (the same as `/clear`): the session keeps its row in the sidebar, the old conversation stays under **Resume previous session**, but the app starts a new Claude Code process only at your next message.
-3. Submits a prompt that has Claude read the notes and continue from the recorded next step.
+2. By default (`reset` set to `session`), the same turn ends by opening a new Desktop app session in the same folder, whose first prompt has Claude read the notes and continue from the recorded next step. It starts with this session's model, effort and permission mode. When the turn ends, the mod moves the new session to top level (so it lives on by itself, and this session is not woken each time its turns end) and unpins this session (`oldSession`). Where no session can be opened (outside the Desktop app, or when the app refuses), the mod compacts the conversation here instead, as below.
+3. With `reset` set to `compact`, when that turn ends, it compacts the conversation down to where the notes are and the next step (the same as `/compact` with instructions), so the process, model and settings stay as they were. In the Desktop app the session has no compaction call of its own, so the mod runs `/compact` with those instructions instead, as if you had typed it. With `reset` set to `clear`, it instead asks the Desktop app to clear the conversation (the same as `/clear`): the session keeps its row in the sidebar, the old conversation stays under **Resume previous session**, but the app starts a new Claude Code process only at your next message. Either way it then submits a prompt that has Claude read the notes and continue from the recorded next step.
 
 Each step shows a toast. A message you had already queued runs first. If you interrupt the hand-off turn, or the reset fails, the mod gives up, says why, and tries again once the context has grown by another 5 points.
 
 - `/handoff-now` hands off right away, at any context size. `/handoff-status` shows where the hand-off stands and what the mod did last.
 - The prompts the mod submits are shown in the transcript, marked `[context-handoff]`, and each step leaves a dim `context-handoff:` line there.
+- With a new session: the app opens one only on a turn that follows your own message, which a hand-off after your turn or `/handoff-now` is. A session that shares another session's worktree cannot be moved to top level, so it stays under this one.
 - With the compaction through `/compact` (the Desktop app, or `compaction` set to `command`): the `/compact` line shows in the transcript, the resume follows once its compaction has run, and if nothing has been compacted within five minutes the mod gives up.
 - With the clear: the app is asked as the hand-off turn starts and clears as it ends; if it has not within eight seconds, the mod gives up. If a message you queued runs after the hand-off turn, the notes are recorded again. The resume is written to the mod's store, so the process the app starts next continues from the notes. The app starts that process only when you send your next message, however long after the clear: that message runs first, then the resume. Until then the conversation stays empty. A session started from another device cannot be cleared, so Remote Control is turned off for the clear and on again after the resume (`pauseRemoteControl`). Outside the Desktop app there is no app to clear, so the mod gives up after recording the notes.
 
@@ -147,11 +148,12 @@ Each step shows a toast. A message you had already queued runs first. If you int
 | `enabled` | on | Hand off on its own past the threshold. Off, only `/handoff-now` hands off |
 | `threshold` | 40 | How full the context window is, in percent, before the hand-off starts |
 | `retriggerStep` | 5 | After an interrupted or failed hand-off, try again once the context has grown this many points |
-| `reset` | `compact` | How the context is reset: `compact` (in place, process and settings kept, no input needed) or `clear` (the Desktop app's clear: a fresh conversation, continued only after your next message) |
+| `reset` | `session` | Where the work continues: `session` (a new Desktop app session, or a compaction here where none can be opened), `compact` (in place, process and settings kept, no input needed) or `clear` (the Desktop app's clear: a fresh conversation, continued only after your next message) |
+| `oldSession` | `unpin` | With a new session: `unpin` the session that handed off, or `keep` it as it is |
 | `compaction` | `auto` | How the compaction is made: `auto` (the engine's compaction call, or `/compact` where the session has none, as in the Desktop app), `call` (the call alone) or `command` (`/compact` alone, queued as if typed) |
 | `closeCommand` | `session-close` | The project skill Claude is told to run to record the hand-off, when the project has it |
 | `closePrompt` | empty | Replaces the built-in hand-off prompt and the close skill. `{percent}` and `{threshold}` are filled in |
-| `resumePrompt` | empty | Replaces the built-in prompt submitted after the reset |
+| `resumePrompt` | empty | Replaces the built-in prompt the work continues from: the new session's first prompt, or the one submitted after the reset |
 | `pauseRemoteControl` | on | With the clear: turn Remote Control off for it, and on again after the resume. Off, such a session is not cleared |
 
 To change them in a terminal session, run `/plugin configure context-handoff@claude-mod-repo`, or pass them when you install:
@@ -188,7 +190,7 @@ mod는 Claude Code의 모양과 동작을 바꾸는 플러그인입니다. 이 �
 | :- | :- | :- |
 | [`context-meter`](context-meter) | git 브랜치, 컨텍스트 창이 얼마나 찼는지, 직전 턴이 얼마나 늘렸는지, 플랜 한도를 얼마나 썼는지를 입력창 위 한 줄로 표시 | 터미널, 데스크톱 앱 Code 탭 |
 | [`auto-pin`](auto-pin) | 새 세션이 시작되면 사이드바에 바로 고정 | 데스크톱 앱 Code 탭 |
-| [`context-handoff`](context-handoff) | 컨텍스트 창이 40% 차면 Claude가 인계 기록을 쓰게 하고, 컨텍스트를 초기화한 뒤, 기록을 읽어 이어감 | 터미널, 데스크톱 앱 Code 탭 |
+| [`context-handoff`](context-handoff) | 컨텍스트 창이 40% 차면 Claude가 인계 기록을 쓰게 하고, 새 세션(또는 컨텍스트 초기화 뒤)에서 기록을 읽어 이어감 | 터미널, 데스크톱 앱 Code 탭 |
 
 ### 요구 사항
 
@@ -304,13 +306,14 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 턴이 끝날 때마다 컨텍스트 창이 얼마나 찼는지 읽고, 임계값(기본 40%)을 넘으면 다음을 차례로 합니다.
 
 1. Claude가 인계 기록을 쓰도록 프롬프트를 제출합니다. 프로젝트에 `session-close` 스킬이 있으면 그 스킬을 실행하라고 지시하고, 없으면 프로젝트 `CLAUDE.md`의 세션 종료 절차를 따르거나, `PROGRESS.md`를 갱신하거나, 프로젝트 루트에 `HANDOFF.md`를 씁니다.
-2. 그 턴이 끝나면 컨텍스트를 초기화합니다. 기본은 대화를 "기록 위치와 다음 단계"만 남기고 압축하는 것(`/compact`에 지시문을 붙인 것과 같음)이라 프로세스·모델·설정이 그대로 유지됩니다. 데스크톱 앱의 세션에는 압축 호출이 없으므로, 거기서는 직접 입력한 것처럼 같은 지시문으로 `/compact`를 실행합니다. `reset`을 `clear`로 두면 대신 데스크톱 앱에 대화를 비워 달라고 요청합니다(`/clear`와 같음). 세션은 사이드바의 같은 행에 남고 이전 대화는 **Resume previous session**으로 되돌릴 수 있지만, 앱은 다음 메시지를 보낼 때에야 새 Claude Code 프로세스를 띄웁니다.
-3. Claude가 기록을 읽고 기록된 다음 시작점부터 이어가도록 프롬프트를 제출합니다.
+2. 기본(`reset`이 `session`)은 같은 턴의 마지막에 같은 폴더로 데스크톱 앱 새 세션을 엽니다. 새 세션의 첫 프롬프트는 기록을 읽고 기록된 다음 시작점부터 이어가라는 것이며, 이 세션의 모델·effort·권한 모드로 시작합니다. 턴이 끝나면 mod가 새 세션을 최상위로 옮기고(독립적으로 남고, 새 세션의 턴이 끝날 때마다 이 세션이 깨어나지 않음) 이 세션의 고정을 풉니다(`oldSession`). 새 세션을 열 수 없으면(데스크톱 앱 밖이거나 앱이 거부하면) 아래처럼 여기서 압축합니다.
+3. `reset`이 `compact`면 그 턴이 끝날 때 대화를 "기록 위치와 다음 단계"만 남기고 압축합니다(`/compact`에 지시문을 붙인 것과 같음). 프로세스·모델·설정이 그대로 유지됩니다. 데스크톱 앱의 세션에는 압축 호출이 없으므로, 거기서는 직접 입력한 것처럼 같은 지시문으로 `/compact`를 실행합니다. `reset`을 `clear`로 두면 대신 데스크톱 앱에 대화를 비워 달라고 요청합니다(`/clear`와 같음). 세션은 사이드바의 같은 행에 남고 이전 대화는 **Resume previous session**으로 되돌릴 수 있지만, 앱은 다음 메시지를 보낼 때에야 새 Claude Code 프로세스를 띄웁니다. 어느 쪽이든 그 뒤 Claude가 기록을 읽고 기록된 다음 시작점부터 이어가도록 프롬프트를 제출합니다.
 
 단계마다 토스트로 알립니다. 이미 대기 중이던 메시지가 있으면 그것이 먼저 실행됩니다. 인계 턴을 중단하거나 초기화에 실패하면 포기하고 이유를 알린 뒤, 컨텍스트가 5포인트 더 차면 다시 시도합니다.
 
 - `/handoff-now`는 컨텍스트 크기와 상관없이 바로 인계합니다. `/handoff-status`는 인계가 어느 단계인지와 마지막으로 한 일을 보여 줍니다.
 - mod가 제출하는 프롬프트는 `[context-handoff]` 표시와 함께 대화에 보이고, 단계마다 흐릿한 `context-handoff:` 줄이 대화에 남습니다.
+- 새 세션일 때: 앱은 사용자가 직접 보낸 메시지에 이어지는 턴에서만 새 세션을 엽니다. 사용자 턴 뒤의 자동 인계와 `/handoff-now`가 여기에 해당합니다. 다른 세션의 worktree를 함께 쓰는 세션은 최상위로 옮길 수 없어 이 세션 아래에 남습니다.
 - `/compact`로 압축할 때(데스크톱 앱, 또는 `compaction`을 `command`로 둔 경우): `/compact` 줄이 대화에 보이고, 그 압축이 끝나면 재개합니다. 5분 안에 압축되지 않으면 포기합니다.
 - `clear`일 때: 인계 턴이 시작될 때 앱에 요청하고 턴이 끝날 때 비워집니다. 8초 안에 비워지지 않으면 포기합니다. 대기 중이던 메시지가 인계 턴 뒤에 실행되면 기록을 다시 씁니다. 재개 지시는 mod 저장소에 적어 두므로 앱이 다음에 띄우는 프로세스가 기록을 읽고 이어갑니다. 앱은 비운 뒤 아무리 시간이 지나도 다음 메시지를 보낼 때에야 그 프로세스를 띄우며, 그 메시지가 먼저 실행된 뒤 재개합니다. 그때까지 대화는 비어 있습니다. 다른 기기에서 시작한 세션은 비울 수 없으므로 비우는 동안 Remote Control을 끄고 재개 후 다시 켭니다(`pauseRemoteControl`). 데스크톱 앱 밖에는 비워 줄 앱이 없으므로 기록만 쓴 뒤 포기합니다.
 
@@ -321,11 +324,12 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 | `enabled` | 켜짐 | 임계값을 넘으면 자동으로 인계. 끄면 `/handoff-now`로만 인계 |
 | `threshold` | 40 | 인계를 시작하는 컨텍스트 창 사용률(%) |
 | `retriggerStep` | 5 | 중단되거나 실패한 인계를 컨텍스트가 몇 포인트 더 찼을 때 다시 시도할지 |
-| `reset` | `compact` | 컨텍스트 초기화 방식: `compact`(제자리 압축, 프로세스·설정 유지, 입력 불필요) 또는 `clear`(데스크톱 앱의 비우기: 새 대화, 다음 메시지를 보내야 이어감) |
+| `reset` | `session` | 작업을 이어갈 곳: `session`(데스크톱 앱 새 세션, 열 수 없으면 여기서 압축), `compact`(제자리 압축, 프로세스·설정 유지, 입력 불필요) 또는 `clear`(데스크톱 앱의 비우기: 새 대화, 다음 메시지를 보내야 이어감) |
+| `oldSession` | `unpin` | 새 세션일 때 인계한 세션의 고정을 풀지(`unpin`), 그대로 둘지(`keep`) |
 | `compaction` | `auto` | 압축 방법: `auto`(엔진의 압축 호출, 데스크톱 앱처럼 호출이 없는 세션에서는 `/compact`), `call`(호출만), `command`(`/compact`만, 입력한 것처럼 큐에 넣음) |
 | `closeCommand` | `session-close` | 프로젝트에 있을 때 인계 기록용으로 실행하라고 지시할 스킬 |
 | `closePrompt` | 비어 있음 | 내장 인계 프롬프트와 스킬 지시를 대체. `{percent}`, `{threshold}`가 채워짐 |
-| `resumePrompt` | 비어 있음 | 초기화 뒤 제출하는 내장 프롬프트를 대체 |
+| `resumePrompt` | 비어 있음 | 작업을 이어가는 내장 프롬프트를 대체: 새 세션의 첫 프롬프트, 또는 초기화 뒤 제출하는 프롬프트 |
 | `pauseRemoteControl` | 켜짐 | `clear`일 때 비우는 동안 Remote Control을 끄고 재개 후 다시 켬. 끄면 그런 세션은 비우지 않음 |
 
 터미널 세션에서는 `/plugin configure context-handoff@claude-mod-repo`로 바꾸거나, 설치할 때 넘깁니다.
