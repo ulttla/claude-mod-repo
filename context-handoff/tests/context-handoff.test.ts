@@ -98,6 +98,9 @@ function wire($: Engine, on: On, context: Context, options: WireOptions = {}) {
 // The clear calls among what the mod called
 const clears = (calls: AppCall[]) => calls.filter((call) => call.tool === 'clear_session')
 
+// The tests of the compaction in place, which is not the default
+const COMPACT = { options: { reset: 'compact' } }
+
 // Runs the session up to the end of the hand-off turn: the hand-off prompt is submitted[0]
 async function handOff($: Engine, submitted: string[], reason: 'answer' | 'aborted' = 'answer') {
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
@@ -108,7 +111,7 @@ async function handOff($: Engine, submitted: string[], reason: 'answer' | 'abort
   await $.turn.complete(turn('t2', reason))
 }
 
-test('past the threshold the mod records a hand-off, compacts the conversation, and resumes', async ($, on) => {
+test('past the threshold the mod records a hand-off, compacts the conversation, and resumes', COMPACT, async ($, on) => {
   const context = { percent: 45 }
   const { submitted, calls, logged, compactions, clock } = wire($, on, context)
 
@@ -152,7 +155,7 @@ test('past the threshold the mod records a hand-off, compacts the conversation, 
   ])
 })
 
-test('a compaction refused while a turn still runs is tried again', async ($, on) => {
+test('a compaction refused while a turn still runs is tried again', COMPACT, async ($, on) => {
   let refusals = 2
   const compact: Compactor = () => {
     if (refusals-- > 0) throw new Error('a turn is running')
@@ -171,7 +174,7 @@ test('a compaction refused while a turn still runs is tried again', async ($, on
   expect(logged.at(-1)).toBe('context-handoff: continuing in a fresh context')
 })
 
-test('a compaction that keeps failing, or is skipped, is given up', async ($, on) => {
+test('a compaction that keeps failing, or is skipped, is given up', COMPACT, async ($, on) => {
   const { submitted, compactions, logged, clock } = wire($, on, { percent: 45 }, {
     compact: () => {
       throw new Error('a turn is running')
@@ -184,7 +187,7 @@ test('a compaction that keeps failing, or is skipped, is given up', async ($, on
   expect(submitted.length).toBe(1)
 })
 
-test('a skipped compaction is given up', async ($, on) => {
+test('a skipped compaction is given up', COMPACT, async ($, on) => {
   const { submitted, logged, clock } = wire($, on, { percent: 45 }, { compact: () => ({ skip: 'a hook vetoed it' }) })
   await handOff($, submitted)
   await clock.advance(300)
@@ -194,7 +197,7 @@ test('a skipped compaction is given up', async ($, on) => {
 
 // --- The /compact command in the call's place: chosen, or where the session has no call (the desktop app's) ---
 
-const COMMAND = { options: { compaction: 'command' } }
+const COMMAND = { options: { reset: 'compact', compaction: 'command' } }
 
 // One /compact run the mod asked for
 type CommandRun = { command: string; args: string }
@@ -327,7 +330,7 @@ test('a /compact command that never compacts is given up after five minutes', CO
   expect(submitted.length).toBe(1)
 })
 
-test('with the call alone, a refusal naming a headless session is retried like any other', { options: { compaction: 'call' } }, async ($, on) => {
+test('with the call alone, a refusal naming a headless session is retried like any other', { options: { reset: 'compact', compaction: 'call' } }, async ($, on) => {
   const ran: CommandRun[] = []
   const { submitted, compactions, logged, clock } = wire($, on, { percent: 45 }, {
     compact: () => {
@@ -346,7 +349,7 @@ test('with the call alone, a refusal naming a headless session is retried like a
   expect(logged.at(-1)).toContain('context-handoff: gave up: the conversation could not be compacted')
 })
 
-test('below the threshold nothing happens', async ($, on) => {
+test('below the threshold nothing happens', COMPACT, async ($, on) => {
   const { submitted, compactions } = wire($, on, { percent: 39 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
@@ -355,7 +358,7 @@ test('below the threshold nothing happens', async ($, on) => {
   expect(compactions.length).toBe(0)
 })
 
-test('a turn the user ran before the hand-off turn is left alone', async ($, on) => {
+test('a turn the user ran before the hand-off turn is left alone', COMPACT, async ($, on) => {
   const { submitted, compactions, clock } = wire($, on, { percent: 50 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
@@ -376,7 +379,7 @@ test('a turn the user ran before the hand-off turn is left alone', async ($, on)
   expect(compactions.length).toBe(1)
 })
 
-test('an interrupted hand-off is given up, and tried again once the context grew by the step', async ($, on) => {
+test('an interrupted hand-off is given up, and tried again once the context grew by the step', COMPACT, async ($, on) => {
   const context = { percent: 41 }
   const { submitted, compactions, logged, clock } = wire($, on, context)
   await handOff($, submitted, 'aborted')
@@ -397,7 +400,7 @@ test('an interrupted hand-off is given up, and tried again once the context grew
   expect(submitted.length).toBe(2)
 })
 
-test("the project's close skill is run when the project has it", async ($, on) => {
+test("the project's close skill is run when the project has it", COMPACT, async ($, on) => {
   const { submitted } = wire($, on, { percent: 45 }, { commands: ['session-close', 'deploy-staging'] })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
@@ -411,7 +414,7 @@ test("the project's close skill is run when the project has it", async ($, on) =
 
 test(
   'the options set the threshold, the close skill and the prompts',
-  { options: { threshold: 20, closeCommand: '/wrap-up', closePrompt: 'Close at {percent}% ({threshold}%)', resumePrompt: 'Go on' } },
+  { options: { reset: 'compact', threshold: 20, closeCommand: '/wrap-up', closePrompt: 'Close at {percent}% ({threshold}%)', resumePrompt: 'Go on' } },
   async ($, on) => {
     const { submitted, clock } = wire($, on, { percent: 25 }, { commands: ['wrap-up'] })
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
@@ -427,7 +430,7 @@ test(
   },
 )
 
-test('with the automatic hand-off off, only /handoff-now hands off', { options: { enabled: false } }, async ($, on) => {
+test('with the automatic hand-off off, only /handoff-now hands off', { options: { reset: 'compact', enabled: false } }, async ($, on) => {
   const { submitted, compactions, clock } = wire($, on, { percent: 90 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   await $.turn.start({ turnId: 't1', text: 'hello' })
@@ -456,7 +459,7 @@ test('with the automatic hand-off off, only /handoff-now hands off', { options: 
   expect(compactions.length).toBe(1)
 })
 
-test('/handoff-status tells the phase, the context, the reset and what happened last', async ($, on) => {
+test('/handoff-status tells the phase, the context, the reset and what happened last', COMPACT, async ($, on) => {
   const { submitted } = wire($, on, { percent: 45 })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
   const before = await $.command.run({ command: 'handoff-status' })
@@ -681,4 +684,102 @@ test('with the clear, when no SessionStart follows it, the resume prompt is subm
   // A SessionStart arriving afterwards does not submit it twice
   await $.classic.SessionStart({ source: 'clear' })
   expect(submitted.length).toBe(2)
+})
+
+// --- A new desktop-app session, the default ---
+
+// The app's answer carrying `value` as JSON text
+const json = (value: unknown) => ({ value: { content: [{ type: 'text', text: JSON.stringify(value) }], isError: false } })
+const refused = (text: string) => ({ value: { content: [{ type: 'text', text }], isError: true } })
+
+// An app where this session is local_parent, already the starter of local_old; `opened` adds
+// the session the hand-off turn opens to what list_sessions reports
+function appWith(state: { opened: boolean }, answers: Record<string, unknown> = {}) {
+  return (call: AppCall) => {
+    if (call.tool in answers) return answers[call.tool]
+    if (call.tool === 'get_session') return json({ sessionId: 'local_parent' })
+    if (call.tool === 'list_sessions') {
+      const old = { sessionId: 'local_old', title: 'Earlier side task', startedBy: 'local_parent' }
+      const opened = { sessionId: 'local_new', title: 'Phase C of the build', startedBy: 'local_parent' }
+      return json(state.opened ? [opened, old] : [old])
+    }
+    return CLEARED
+  }
+}
+
+test('past the threshold the hand-off turn opens a new session, which is moved to top level, and this one is unpinned', async ($, on) => {
+  const state = { opened: false }
+  const { submitted, calls, logged, compactions, clock } = wire($, on, { percent: 45 }, { app: appWith(state) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't1', text: 'fix the build' })
+  await $.turn.complete(turn('t1'))
+
+  // The prompt records the notes, then opens the session with the resume as its brief
+  expect(submitted.length).toBe(1)
+  expect(submitted[0]).toContain('45% full, past the 40%')
+  expect(submitted[0]).toContain('HANDOFF.md')
+  expect(submitted[0]).toContain('mcp__ccd_session__start_session')
+  expect(submitted[0]).toContain('initiation "user_asked", context "fresh"')
+  expect(submitted[0]).toContain('<brief>This session takes over work from another session whose context filled up.')
+  expect(submitted[0]).toContain('If the call is refused')
+
+  // The turn opens the session and ends
+  await $.turn.start({ turnId: 't2', text: submitted[0] })
+  state.opened = true
+  await $.turn.complete(turn('t2'))
+  expect(calls.filter((c) => c.tool === 'detach_session').map((c) => c.args)).toEqual([{ session_id: 'local_new' }])
+  expect(calls.filter((c) => c.tool === 'set_pinned')).toEqual([
+    { server: 'ccd_sidebar', tool: 'set_pinned', args: { session_id: 'self', pinned: false } },
+  ])
+  expect(logged.at(-1)).toBe('context-handoff: the work continues in the session "Phase C of the build" (local_new)')
+
+  // Nothing more happens here: no compaction, no resume prompt
+  await clock.advance(10000)
+  expect(compactions.length).toBe(0)
+  expect(submitted.length).toBe(1)
+  const status = await $.command.run({ command: 'handoff-status' })
+  expect(status.text).toContain('Phase: idle.')
+  expect(status.text).toContain('Reset: session.')
+})
+
+test('when the hand-off turn opens no session, the conversation is compacted here instead', async ($, on) => {
+  const { submitted, calls, logged, compactions, clock } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await handOff($, submitted)
+  expect(logged).toContain('context-handoff: no session was opened to continue the work; compacting here instead')
+  expect(calls.some((c) => c.tool === 'detach_session' || c.tool === 'set_pinned')).toBe(false)
+  await clock.advance(300)
+  expect(compactions.length).toBe(1)
+  expect(submitted.length).toBe(2)
+  expect(submitted[1]).toContain('[context-handoff] The context was reset after a hand-off.')
+})
+
+test('with oldSession keep the old session stays pinned; a detach the app refuses is noted', { options: { oldSession: 'keep' } }, async ($, on) => {
+  const state = { opened: false }
+  const app = appWith(state, { detach_session: refused('shares another session worktree') })
+  const { submitted, calls, logged } = wire($, on, { percent: 45 }, { app })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't1', text: 'hello' })
+  await $.turn.complete(turn('t1'))
+  await $.turn.start({ turnId: 't2', text: submitted[0] })
+  state.opened = true
+  await $.turn.complete(turn('t2'))
+  expect(calls.some((c) => c.tool === 'set_pinned')).toBe(false)
+  expect(logged).toContain('context-handoff: the new session stays under this one: shares another session worktree')
+  expect(logged.at(-1)).toContain('the work continues in the session')
+})
+
+test('the close skill and a custom prompt are followed by opening the session', { options: { closePrompt: 'Wrap up at {percent}%', resumePrompt: 'Go on from NOTES.md' } }, async ($, on) => {
+  const { submitted } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.turn.start({ turnId: 't1', text: 'hello' })
+  await $.turn.complete(turn('t1'))
+  expect(submitted[0].startsWith('[context-handoff] Wrap up at 45% When the notes are written, open the session')).toBe(true)
+  expect(submitted[0]).toContain('<brief>Go on from NOTES.md</brief>')
+})
+
+test('/handoff-now says a new session continues the work', async ($, on) => {
+  wire($, on, { percent: 12 }, { app: appWith({ opened: false }) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  const { text } = await $.command.run({ command: 'handoff-now' })
+  expect(text).toBe('Recording the hand-off at 12% context. Once it is written a new session continues the work from the notes.')
 })

@@ -6,6 +6,8 @@ const MARK = '[context-handoff]'
 const RESUME_KEY = 'pendingResume'
 // How long the app gets to clear the conversation once the hand-off turn has ended
 const CLEAR_WAIT_MS = 8000
+// The app's tool that opens the session the work continues in
+const START_TOOL = 'mcp__ccd_session__start_session'
 // When the compaction is tried after the hand-off turn: it is refused while a turn still runs
 const COMPACT_TRIES_MS = [300, 1000, 2000, 4000, 8000]
 // How long the /compact command gets to compact the conversation where it stands in for the call
@@ -20,6 +22,7 @@ const COMPACT_INSTRUCTIONS =
 // Where the hand-off stands:
 //   idle        nothing in progress
 //   closing     the hand-off prompt is submitted; waiting for its turn to run and finish
+//   handing     (session) the hand-off turn has ended; finding the session it opened
 //   clearing    (clear) the app was asked to clear; waiting for the conversation to end with it
 //   compacting  (compact) the hand-off turn has ended; compacting the conversation
 //   resuming    the conversation was reset; waiting to submit the resume prompt
@@ -27,6 +30,8 @@ let phase = 'idle'
 // The hand-off prompt as submitted, and the id of the turn running it
 let closeText = null
 let closeTurnId = null
+// (session) The sessions this one had started before the hand-off, to tell the new one apart
+let linkedBefore = null
 // The context percent at which the last hand-off began; the next waits for `step` more
 let triggeredAt = null
 // The fallback that submits the resume prompt when no SessionStart follows the clear
@@ -57,7 +62,8 @@ function settingsOf(options) {
     enabled: options.enabled !== false,
     threshold: numberOf(options.threshold, 40, 1, 100),
     step: numberOf(options.retriggerStep, 5, 1, 100),
-    reset: options.reset === 'clear' ? 'clear' : 'compact',
+    reset: options.reset === 'clear' || options.reset === 'compact' ? options.reset : 'session',
+    unpinOld: options.oldSession !== 'keep',
     compaction: options.compaction === 'call' || options.compaction === 'command' ? options.compaction : 'auto',
     closeCommand: String(options.closeCommand ?? 'session-close').trim().replace(/^\//, ''),
     closePrompt: String(options.closePrompt ?? '').trim(),
@@ -82,13 +88,20 @@ function closePromptFor(cfg, percent, hasClose, asked) {
     : `${fill}, past the ${cfg.threshold}% hand-off threshold.`
   const pending =
     'If the previous turn stopped to ask the user something, put that question in the notes instead of answering it.'
-  const then = 'the context is then reset automatically and the work continues from the notes.'
-  if (cfg.closePrompt) return `${MARK} ${fillIn(cfg.closePrompt, percent, cfg)}`
+  // With a new session the turn ends by opening it; otherwise by stopping for the reset
+  const then =
+    cfg.reset === 'session'
+      ? openSessionStep(cfg)
+      : 'When the notes are written, stop: the context is then reset automatically and the work continues from the notes.'
+  if (cfg.closePrompt) {
+    const custom = `${MARK} ${fillIn(cfg.closePrompt, percent, cfg)}`
+    return cfg.reset === 'session' ? `${custom} ${then}` : custom
+  }
   // A prompt may not begin with a slash, so the skill is named for the model to invoke
   if (hasClose) {
     return (
       `${MARK} ${level} Run this project's /${cfg.closeCommand} skill now (invoke it with the Skill tool) to record the hand-off, ` +
-      `and make the next starting point exact. ${pending} When the notes are written, stop: ${then}`
+      `and make the next starting point exact. ${pending} ${then}`
     )
   }
   return (
@@ -96,19 +109,39 @@ function closePromptFor(cfg, percent, hasClose, asked) {
     "if this project's CLAUDE.md defines a session-close or progress-logging procedure, follow it; " +
     'otherwise update PROGRESS.md if the project has one, or else write HANDOFF.md at the project root. ' +
     'Cover what was done this session, the current state, measured facts worth not measuring again, open questions, ' +
-    `and the exact next step. ${pending} When the notes are written, stop: ${then}`
+    `and the exact next step. ${pending} ${then}`
   )
 }
 
-// The prompt that continues the work after the reset
-function resumePromptFor(cfg) {
-  if (cfg.resumePrompt) return `${MARK} ${cfg.resumePrompt}`
+// (session) The last step of the hand-off turn: open the session that continues the work, with
+// the resume as its brief. The app opens one only on a turn that came from the user; when it
+// refuses, the turn just stops and the mod compacts this conversation instead.
+function openSessionStep(cfg) {
   return (
-    `${MARK} The context was reset after a hand-off. Read this project's hand-off notes: ` +
-    'the progress file CLAUDE.md names, else PROGRESS.md, else HANDOFF.md at the project root. ' +
-    'Say in one line what you are picking up, then continue from the recorded next step without redoing work the notes mark as done. ' +
-    'If the notes hold a question for the user, ask it and wait.'
+    `When the notes are written, open the session that continues the work: call ${START_TOOL} once ` +
+    '(load it with ToolSearch first if it is deferred) with initiation "user_asked", context "fresh", use_worktree false, ' +
+    'a title naming the work (under 60 characters), a background of at least 80 characters ' +
+    '(the goal, the decisions so far, and which file holds the notes), ' +
+    `and as prompt the text inside <brief>, word for word: <brief>${resumePromptFor(cfg, true)}</brief> ` +
+    'Then stop without a recap: the work is handed over to that session. ' +
+    'If the call is refused, do not retry it or propose a session instead; just stop, and the context is compacted here.'
   )
+}
+
+// Where the notes are read from and how the work picks up from them
+const READ_NOTES =
+  "Read this project's hand-off notes: the progress file CLAUDE.md names, else PROGRESS.md, else HANDOFF.md at the project root. " +
+  'Say in one line what you are picking up, then continue from the recorded next step without redoing work the notes mark as done. ' +
+  'If the notes hold a question for the user, ask it and wait.'
+
+// The prompt that continues the work: as the brief of the session that takes it over, or after
+// the reset in this conversation (a fallback of the new session included)
+function resumePromptFor(cfg, brief = false) {
+  if (brief) {
+    return cfg.resumePrompt || `This session takes over work from another session whose context filled up. ${READ_NOTES}`
+  }
+  if (cfg.resumePrompt) return `${MARK} ${cfg.resumePrompt}`
+  return `${MARK} The context was reset after a hand-off. ${READ_NOTES}`
 }
 
 function messageOf(error) {
@@ -170,10 +203,11 @@ async function hasCommand($, name) {
   }
 }
 
-// One call on the desktop app's session server. Resolves to null when it succeeded, else to why not.
-async function callApp($, tool, args) {
+// One call on a desktop app server, by default the session one. Resolves to null when it
+// succeeded, else to why not.
+async function callApp($, tool, args, server = 'ccd_session_mgmt') {
   try {
-    const result = await $.mcp.call('ccd_session_mgmt', tool, args)
+    const result = await $.mcp.call(server, tool, args)
     return result.isError ? textOf(result) || 'no reason given' : null
   } catch (error) {
     return messageOf(error)
@@ -190,6 +224,30 @@ async function appSessionId($) {
   } catch {
     return null
   }
+}
+
+// The ids of the sessions this session started, as the app lists them; [] when it cannot say
+async function linkedSessions($) {
+  try {
+    const result = await $.mcp.call('ccd_session_mgmt', 'list_sessions', { linked: true, limit: 50 })
+    if (result.isError) return []
+    const rows = JSON.parse(textOf(result))
+    return Array.isArray(rows) ? rows.filter((row) => row && typeof row.sessionId === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+// The session the hand-off turn opened: one this session started that was not there before.
+// The list puts the most recent first.
+async function sessionOpened($) {
+  const self = await appSessionId($)
+  const rows = await linkedSessions($)
+  return (
+    rows.find(
+      (row) => !(linkedBefore ?? []).includes(row.sessionId) && (!self || !row.startedBy || row.startedBy === self),
+    ) ?? null
+  )
 }
 
 // Turn Remote Control on again after it was turned off for the clear
@@ -218,6 +276,7 @@ function abandon($, reason) {
   closeText = null
   closeTurnId = null
   compactVia = null
+  linkedBefore = null
   cancelTimers()
   forgetPendingResume($)
   note($, `gave up: ${reason}`)
@@ -231,6 +290,7 @@ async function begin($, cfg, percent, why, asked = false) {
   closeTurnId = null
   triggeredAt = percent
   cancelTimers()
+  if (cfg.reset === 'session') linkedBefore = (await linkedSessions($)).map((row) => row.sessionId)
   const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), asked)
   closeText = text
   note($, `hand-off started: ${why}`)
@@ -288,6 +348,32 @@ function awaitClear($) {
       abandon($, `the app did not clear the conversation within ${CLEAR_WAIT_MS / 1000} s of the hand-off turn ending`)
     }
   })
+}
+
+// (session) The hand-off turn has ended: the session it opened carries the work on. That one is
+// moved to top level, so it lives on by itself and this one is not woken each time its turns
+// end, and this one is unpinned unless kept. With no session opened, this one is compacted.
+async function handOver($, cfg) {
+  phase = 'handing'
+  const opened = await sessionOpened($)
+  if (phase !== 'handing') return
+  if (!opened) {
+    note($, 'no session was opened to continue the work; compacting here instead')
+    return startCompaction($, cfg)
+  }
+  const name = typeof opened.title === 'string' && opened.title ? opened.title : opened.sessionId
+  const detachFailed = await callApp($, 'detach_session', { session_id: opened.sessionId })
+  if (detachFailed) note($, `the new session stays under this one: ${detachFailed}`)
+  if (cfg.unpinOld) {
+    const unpinFailed = await callApp($, 'set_pinned', { session_id: 'self', pinned: false }, 'ccd_sidebar')
+    if (unpinFailed) note($, `this session could not be unpinned: ${unpinFailed}`)
+  }
+  phase = 'idle'
+  closeText = null
+  closeTurnId = null
+  linkedBefore = null
+  note($, `the work continues in the session "${name}" (${opened.sessionId})`)
+  $.ui.toast(`${NAME}: the work continues in "${name}"`, { timeoutMs: 8000 })
 }
 
 // The hand-off turn has ended: compact the conversation down to the notes, then resume.
@@ -441,6 +527,7 @@ export function register(on, options) {
       // The hand-off prompt is still queued, behind the turn that just ran
       if (e.turnId !== closeTurnId) return out
       if (ended === 'aborted') abandon($, 'the hand-off turn was interrupted')
+      else if (cfg.reset === 'session') await handOver($, cfg)
       else startCompaction($, cfg)
       return out
     }
@@ -516,11 +603,11 @@ export function register(on, options) {
       phase = 'idle'
       void begin($, cfg, percent, 'asked by /handoff-now', true)
     })
-    return {
-      text:
-        `Recording the hand-off at ${Math.round(percent)}% context. ` +
-        `Once it is written the context is reset (${cfg.reset}) and the work continues from the notes.`,
-    }
+    const then =
+      cfg.reset === 'session'
+        ? 'a new session continues the work from the notes.'
+        : `the context is reset (${cfg.reset}) and the work continues from the notes.`
+    return { text: `Recording the hand-off at ${Math.round(percent)}% context. Once it is written ${then}` }
   })
 
   on('command.run', { command: 'handoff-status' }, async ($) => {

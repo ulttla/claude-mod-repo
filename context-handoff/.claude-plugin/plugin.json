@@ -1,7 +1,7 @@
 {
   "name": "context-handoff",
-  "version": "0.2.3",
-  "description": "Past a context threshold, records a hand-off, resets the context (a compaction in place, through /compact where the session has no compaction call, or the desktop app's clear), and continues from the notes",
+  "version": "0.3.0",
+  "description": "Past a context threshold, records a hand-off and continues the work from the notes: in a new desktop-app session by default, or in this one after a compaction or the app's clear",
   "author": {
     "name": "ulttla"
   },
@@ -27,12 +27,23 @@
     "reset": {
       "type": "string",
       "title": "How the context is reset",
-      "description": "compact: compact the conversation down to the notes in place; the process, model and settings stay. clear: the desktop app clears the conversation (a fresh row, the old one under Resume previous session); the app starts a new process only at your next message, and the resume runs after that message.",
+      "description": "session: the hand-off turn opens a new desktop-app session that continues from the notes (moved to top level); this one stays as it is. Where no session can be opened, the conversation is compacted instead. compact: compact the conversation down to the notes in place; the process, model and settings stay. clear: the desktop app clears the conversation (a fresh row, the old one under Resume previous session); the app starts a new process only at your next message, and the resume runs after that message.",
       "options": [
+        "session",
         "compact",
         "clear"
       ],
-      "default": "compact"
+      "default": "session"
+    },
+    "oldSession": {
+      "type": "string",
+      "title": "The old session after a hand-off to a new one",
+      "description": "unpin: the session that handed off is unpinned, so the new one takes its place at the top. keep: it is left as it is.",
+      "options": [
+        "unpin",
+        "keep"
+      ],
+      "default": "unpin"
     },
     "compaction": {
       "type": "string",
