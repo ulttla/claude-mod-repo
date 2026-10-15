@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Past a context threshold, records a hand-off and continues the work from the notes: in a new desktop-app session by default, or in this one after a compaction or the app's clear",
   "author": {
     "name": "ulttla"
@@ -27,7 +27,7 @@
     "reset": {
       "type": "string",
       "title": "How the context is reset",
-      "description": "session: the hand-off turn opens a new desktop-app session that continues from the notes (moved to top level); this one stays as it is. Where no session can be opened, the conversation is compacted instead. compact: compact the conversation down to the notes in place; the process, model and settings stay. clear: the desktop app clears the conversation (a fresh row, the old one under Resume previous session); the app starts a new process only at your next message, and the resume runs after that message.",
+      "description": "session: past the threshold, your next message carries the hand-off: that turn records the notes and opens a new desktop-app session (moved to top level) that takes up your message from the notes; this one stays as it is. Where no session can be opened, the conversation is compacted instead. compact: compact the conversation down to the notes in place; the process, model and settings stay. clear: the desktop app clears the conversation (a fresh row, the old one under Resume previous session); the app starts a new process only at your next message, and the resume runs after that message.",
       "options": [
         "session",
         "compact",
