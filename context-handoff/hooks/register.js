@@ -8,6 +8,11 @@ const RESUME_KEY = 'pendingResume'
 const CLEAR_WAIT_MS = 8000
 // The app's tool that opens the session the work continues in
 const START_TOOL = 'mcp__ccd_session__start_session'
+// This plugin's /handoff-now skill, by its name bare or under the plugin's
+const HANDOFF_SKILL = /(^|:)handoff-now$/
+// Where a prompt the user sent comes from: typed, over Remote Control, or the desktop app's own
+// composer, which drives the engine as an SDK host. The app opens a session only on such a turn
+const USER_ORIGINS = ['composer', 'bridge', 'sdk']
 // When the compaction is tried after the hand-off turn: it is refused while a turn still runs
 const COMPACT_TRIES_MS = [300, 1000, 2000, 4000, 8000]
 // How long the /compact command gets to compact the conversation where it stands in for the call
@@ -21,7 +26,8 @@ const COMPACT_INSTRUCTIONS =
 
 // Where the hand-off stands:
 //   idle        nothing in progress
-//   closing     the hand-off prompt is submitted; waiting for its turn to run and finish
+//   armed       (session) past the threshold; the user's next message runs the hand-off
+//   closing     the hand-off is asked for; waiting for its turn to run and finish
 //   handing     (session) the hand-off turn has ended; finding the session it opened
 //   clearing    (clear) the app was asked to clear; waiting for the conversation to end with it
 //   compacting  (compact) the hand-off turn has ended; compacting the conversation
@@ -30,6 +36,11 @@ let phase = 'idle'
 // The hand-off prompt as submitted, and the id of the turn running it
 let closeText = null
 let closeTurnId = null
+// What asks for the hand-off turn: a prompt this mod submits (`prompt`), found by its tag, or
+// the turn the user starts (`user`: their next message, or /handoff-now), the next to start
+let closeBy = null
+// The main loop's turn running now, for /handoff-now expanded after its turn started
+let currentTurnId = null
 // (session) The sessions this one had started before the hand-off, to tell the new one apart
 let linkedBefore = null
 // The context percent at which the last hand-off began; the next waits for `step` more
@@ -80,21 +91,32 @@ function fillIn(text, percent, cfg) {
 
 // The prompt that records the hand-off: the project's own close skill when it has one,
 // a custom prompt when configured, or the built-in instructions. It opens with why the
-// hand-off is made: the threshold passed, or /handoff-now asked for it, whatever the context holds
-function closePromptFor(cfg, percent, hasClose, asked) {
+// hand-off is made, `why` being:
+//   threshold  the threshold passed (a prompt of its own)
+//   asked      /handoff-now asked for it, whatever the context holds
+//   carry      the threshold passed, and the user's message it rides on goes to the new session
+function closePromptFor(cfg, percent, hasClose, why = 'threshold') {
   const fill = `The context window is ${Math.round(percent)}% full`
-  const level = asked
-    ? `${fill}; a hand-off was asked for with /handoff-now.`
-    : `${fill}, past the ${cfg.threshold}% hand-off threshold.`
-  const pending =
-    'If the previous turn stopped to ask the user something, put that question in the notes instead of answering it.'
+  const carry = why === 'carry'
+  const level =
+    why === 'asked'
+      ? `${fill}; a hand-off was asked for with /handoff-now.`
+      : carry
+        ? `${fill}, past the ${cfg.threshold}% hand-off threshold, so the user's message above is handed to a fresh session ` +
+          'instead of being worked on here. Do not act on it.'
+        : `${fill}, past the ${cfg.threshold}% hand-off threshold.`
+  const pending = carry
+    ? "In the notes, make the user's message above, quoted in full, the first item of the exact next step. " +
+      'If the turn before it stopped to ask the user something, put that question in the notes too.'
+    : 'If the previous turn stopped to ask the user something, put that question in the notes instead of answering it.'
   // With a new session the turn ends by opening it; otherwise by stopping for the reset
   const then =
     cfg.reset === 'session'
-      ? openSessionStep(cfg)
+      ? openSessionStep(cfg, carry)
       : 'When the notes are written, stop: the context is then reset automatically and the work continues from the notes.'
   if (cfg.closePrompt) {
     const custom = `${MARK} ${fillIn(cfg.closePrompt, percent, cfg)}`
+    if (carry) return `${custom} ${level} ${pending} ${then}`
     return cfg.reset === 'session' ? `${custom} ${then}` : custom
   }
   // A prompt may not begin with a slash, so the skill is named for the model to invoke
@@ -114,16 +136,21 @@ function closePromptFor(cfg, percent, hasClose, asked) {
 }
 
 // (session) The last step of the hand-off turn: open the session that continues the work, with
-// the resume as its brief. The app opens one only on a turn that came from the user; when it
+// the resume as its brief, and the user's message after it when the hand-off carries one. The app
+// opens one only on a turn the user started (their message, or /handoff-now they typed); when it
 // refuses, the turn just stops and the mod compacts this conversation instead.
-function openSessionStep(cfg) {
+function openSessionStep(cfg, carry = false) {
+  const message = carry
+    ? ", then a blank line, the line \"The user's latest message, sent to the old session and not answered there:\", " +
+      "and the user's message above, word for word"
+    : ''
   return (
     `When the notes are written, open the session that continues the work: call ${START_TOOL} once ` +
     '(load it with ToolSearch first if it is deferred) with initiation "user_asked", context "fresh", use_worktree false, ' +
     'a title naming the work (under 60 characters), a background of at least 80 characters ' +
     '(the goal, the decisions so far, and which file holds the notes), ' +
-    `and as prompt the text inside <brief>, word for word: <brief>${resumePromptFor(cfg, true)}</brief> ` +
-    'Then stop without a recap: the work is handed over to that session. ' +
+    `and as prompt the text inside <brief>, word for word${message}: <brief>${resumePromptFor(cfg, true)}</brief> ` +
+    'Then stop with one line telling the user the work continues in that session. ' +
     'If the call is refused, do not retry it or propose a session instead; just stop, and the context is compacted here.'
   )
 }
@@ -275,6 +302,7 @@ function abandon($, reason) {
   phase = 'idle'
   closeText = null
   closeTurnId = null
+  closeBy = null
   compactVia = null
   linkedBefore = null
   cancelTimers()
@@ -284,14 +312,42 @@ function abandon($, reason) {
   void restoreRemoteControl($)
 }
 
-// Submit the hand-off prompt; its turn is found by the tag at turn.start
-async function begin($, cfg, percent, why, asked = false) {
+// The hand-off is asked for: its turn is awaited. With a new session, the sessions this one
+// started so far are noted, to tell the one the hand-off turn opens apart
+async function prepare($, cfg, by, percent) {
   phase = 'closing'
   closeTurnId = null
+  closeText = null
+  closeBy = by
   triggeredAt = percent
   cancelTimers()
   if (cfg.reset === 'session') linkedBefore = (await linkedSessions($)).map((row) => row.sessionId)
-  const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), asked)
+}
+
+// The turn that runs the hand-off has started. With the clear, the app is asked now, so the
+// conversation is cleared as this turn ends.
+async function closeTurnStarted($, cfg, turnId) {
+  closeTurnId = turnId
+  note($, 'the hand-off turn is running')
+  if (cfg.reset === 'clear') await requestClear($, cfg)
+}
+
+// (session) Past the threshold: the hand-off waits for the user's next message. The app opens
+// a session only on a turn the user started, which a prompt of this mod's is not; so the
+// instructions ride on that message, which the new session takes over unanswered
+function arm($, percent) {
+  phase = 'armed'
+  triggeredAt = percent
+  note($, `context at ${Math.round(percent)}%: your next message goes to a new session, after the hand-off`)
+  $.ui.toast(`${NAME}: context at ${Math.round(percent)}%, your next message hands off to a new session`, {
+    timeoutMs: 8000,
+  })
+}
+
+// Submit the hand-off prompt; its turn is found by the tag at turn.start
+async function begin($, cfg, percent, why) {
+  await prepare($, cfg, 'prompt', percent)
+  const text = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand))
   closeText = text
   note($, `hand-off started: ${why}`)
   $.ui.toast(`${NAME}: ${why}, recording the hand-off`)
@@ -371,6 +427,7 @@ async function handOver($, cfg) {
   phase = 'idle'
   closeText = null
   closeTurnId = null
+  closeBy = null
   linkedBefore = null
   note($, `the work continues in the session "${name}" (${opened.sessionId})`)
   $.ui.toast(`${NAME}: the work continues in "${name}"`, { timeoutMs: 8000 })
@@ -456,6 +513,7 @@ function submitResume($, cfg) {
   phase = 'idle'
   closeText = null
   closeTurnId = null
+  closeBy = null
   triggeredAt = null
   compactVia = null
   cancelTimers()
@@ -492,12 +550,9 @@ async function resumeIfPending($, cfg) {
 export function register(on, options) {
   const cfg = settingsOf(options)
 
-  // Runs before your first prompt, and again after a reload
+  // Runs before your first prompt, and again after a reload. /handoff-now is this plugin's
+  // skill (skills/handoff-now), so it runs in the turn the user typed it in
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'handoff-now',
-      description: 'Record a hand-off now, reset the context, and continue from the notes',
-    })
     await $.command.register({
       name: 'handoff-status',
       description: 'Show where the automatic hand-off stands and what it did last',
@@ -506,13 +561,44 @@ export function register(on, options) {
     return next(e)
   })
 
-  // The turn that runs the hand-off prompt is the one whose text carries the tag. With the
-  // clear, the app is asked as it starts, so the conversation is cleared as this turn ends.
+  // (session) The user's next message after the threshold carries the hand-off instructions,
+  // read by the model beside it. Not a command, nor one typed over a running turn
+  on('prompt.submit', async ($, e, next) => {
+    const text = typeof e.text === 'string' ? e.text : ''
+    const fromUser = USER_ORIGINS.includes(e.origin?.kind)
+    if (phase !== 'armed' || !fromUser || e.turnId !== undefined || text.trimStart().startsWith('/')) return next(e)
+    const percent = (await readPercent($)) ?? triggeredAt ?? cfg.threshold
+    const instructions = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), 'carry')
+    await prepare($, cfg, 'user', percent)
+    note($, `hand-off started: context at ${Math.round(percent)}%, past ${cfg.threshold}%; your message goes to a new session`)
+    const out = await next({ ...e, context: [...(e.context ?? []), instructions] })
+    if (out && out.drop !== undefined && phase === 'closing' && closeTurnId === null) arm($, percent)
+    return out
+  }).catch(($, e, next) => next(e)) // A failure here never holds up the user's message
+
+  // /handoff-now: the skill's own text stands in when this mod is not loaded; here it reads the
+  // hand-off as configured. It runs in the turn the user typed it in, which may have started
+  on('skill.prompt', async ($, e, next) => {
+    const out = await next(e)
+    if (!HANDOFF_SKILL.test(e.skill)) return out
+    if (phase !== 'idle' && phase !== 'armed') {
+      return { text: `${MARK} A hand-off is already in progress (${phase}). Say so in one line and stop.` }
+    }
+    const percent = (await readPercent($)) ?? 0
+    await prepare($, cfg, 'user', percent)
+    note($, 'hand-off started: asked by /handoff-now')
+    $.ui.toast(`${NAME}: asked by /handoff-now, recording the hand-off`)
+    if (currentTurnId !== null) await closeTurnStarted($, cfg, currentTurnId)
+    return { text: closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), 'asked') }
+  })
+
+  // The turn that runs the hand-off: for a prompt of this mod's, the one whose text carries the
+  // tag; for one the user started, the next to start
   on('turn.start', async ($, e, next) => {
-    if (phase === 'closing' && closeTurnId === null && typeof e.text === 'string' && e.text.includes(MARK)) {
-      closeTurnId = e.turnId
-      note($, 'the hand-off turn is running')
-      if (cfg.reset === 'clear') await requestClear($, cfg)
+    if (e.agentId === undefined) currentTurnId = e.turnId
+    if (phase === 'closing' && closeTurnId === null && e.agentId === undefined) {
+      const tagged = typeof e.text === 'string' && e.text.includes(MARK)
+      if (closeBy === 'user' || tagged) await closeTurnStarted($, cfg, e.turnId)
     }
     return next(e)
   })
@@ -521,6 +607,7 @@ export function register(on, options) {
     const out = await next(e)
     // A subagent's turn is not the conversation's
     if (e.agentId !== undefined) return out
+    if (e.turnId === currentTurnId) currentTurnId = null
     const ended = e.reason ?? (e.isAborted ? 'aborted' : 'answer')
 
     if (phase === 'closing') {
@@ -551,7 +638,8 @@ export function register(on, options) {
     const percent = await readPercent($)
     if (percent === null || percent < cfg.threshold) return out
     if (triggeredAt !== null && percent < triggeredAt + cfg.step) return out
-    await begin($, cfg, percent, `context at ${Math.round(percent)}%, past ${cfg.threshold}%`)
+    if (cfg.reset === 'session') arm($, percent)
+    else await begin($, cfg, percent, `context at ${Math.round(percent)}%, past ${cfg.threshold}%`)
     return out
   })
 
@@ -592,23 +680,6 @@ export function register(on, options) {
     if (e.source === 'clear' && phase === 'resuming') submitResume($, cfg)
     return out
   }).catch(($, e, next) => next(e)) // A failure here never holds up the session
-
-  // Hand off on request, whatever the context holds. A prompt cannot be submitted from
-  // inside a command's own run, so the hand-off begins a moment later, from a timer.
-  on('command.run', { command: 'handoff-now' }, async ($) => {
-    if (phase !== 'idle') return { text: `A hand-off is already in progress (${phase})` }
-    const percent = (await readPercent($)) ?? 0
-    phase = 'closing'
-    $.clock.after(50, () => {
-      phase = 'idle'
-      void begin($, cfg, percent, 'asked by /handoff-now', true)
-    })
-    const then =
-      cfg.reset === 'session'
-        ? 'a new session continues the work from the notes.'
-        : `the context is reset (${cfg.reset}) and the work continues from the notes.`
-    return { text: `Recording the hand-off at ${Math.round(percent)}% context. Once it is written ${then}` }
-  })
 
   on('command.run', { command: 'handoff-status' }, async ($) => {
     const percent = await readPercent($)
