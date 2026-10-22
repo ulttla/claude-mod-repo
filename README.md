@@ -119,7 +119,9 @@ A change takes effect in the next session, or after `/reload-plugins`.
 When you start a new session in the Desktop app's Code tab, the mod pins it in the sidebar. You unpin it yourself when the work is done.
 
 - A session you reopen is left as it is, so one you unpinned stays unpinned.
-- `/auto-pin` pins the current session on request, and says why when it can't.
+- When the sidebar is not reachable yet as the session starts, the mod tries again as each of your first three prompts starts and ends.
+- `/auto-pin` pins the current session on request, says why when it can't, and lists the session's earlier tries.
+- In auto mode the app's classifier refuses the mod's pin, since no request of yours asked for it. Allow the pin in `~/.claude/settings.json` with `"permissions": { "allow": ["mcp__ccd_sidebar__set_pinned"] }`. Claude's own pin and unpin calls then run without a check too.
 - Outside the Desktop app there is no sidebar, and the mod does nothing.
 - Sessions the app starts on its own, such as scheduled tasks, may be pinned too.
 
@@ -295,7 +297,9 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 데스크톱 앱 Code 탭에서 새 세션을 시작하면 사이드바에 고정합니다. 작업이 끝나면 직접 고정을 해제하면 됩니다.
 
 - 다시 연 세션은 건드리지 않으므로, 고정을 해제한 세션은 해제된 채로 남습니다.
-- `/auto-pin`은 현재 세션을 직접 고정하고, 고정하지 못하면 이유를 알려 줍니다.
+- 세션이 시작될 때 사이드바에 아직 닿지 않으면, 처음 세 번의 프롬프트가 시작하고 끝날 때마다 다시 시도합니다.
+- `/auto-pin`은 현재 세션을 직접 고정하고, 고정하지 못하면 이유를 알려 주며, 이 세션의 이전 시도 기록을 보여 줍니다.
+- auto 모드에서는 고정을 요청한 사용자 요청이 없어서 앱의 분류기가 mod의 고정을 거절합니다. `~/.claude/settings.json`에 `"permissions": { "allow": ["mcp__ccd_sidebar__set_pinned"] }`를 넣어 고정을 허용하세요. 그러면 Claude가 직접 하는 고정·해제 호출도 확인 없이 실행됩니다.
 - 데스크톱 앱 밖에는 사이드바가 없으므로 아무 일도 하지 않습니다.
 - 예약 작업처럼 앱이 스스로 시작하는 세션도 고정될 수 있습니다.
 
