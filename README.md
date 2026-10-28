@@ -8,13 +8,14 @@ Small [mods](https://code.claude.com/docs/en/plugins/mods/overview) for Claude C
 
 ## English
 
-A mod is a plugin that changes how Claude Code looks and behaves. This repository holds three, and works as a plugin marketplace, so you can install any of them by name.
+A mod is a plugin that changes how Claude Code looks and behaves. This repository holds four, and works as a plugin marketplace, so you can install any of them by name.
 
 | Mod | What it does | Where it works |
 | :- | :- | :- |
 | [`context-meter`](context-meter) | Shows the git branch, how full the context window is, how much the last turn added, and how much of your plan limits you have used, in a band above the prompt | Terminal and the Desktop app's Code tab |
 | [`auto-pin`](auto-pin) | Pins a new session in the sidebar as soon as it starts | The Desktop app's Code tab |
 | [`context-handoff`](context-handoff) | Once the context window is 40% full, has Claude write hand-off notes and continues from them in a new session (or after resetting the context) | Terminal and the Desktop app's Code tab |
+| [`session-end-unpin`](session-end-unpin) | When you ask to end a session and Claude finds nothing left, unpins it from the sidebar | The Desktop app's Code tab |
 
 ### Requirements
 
@@ -41,6 +42,10 @@ claude plugin install auto-pin@claude-mod-repo
 
 ```bash
 claude plugin install context-handoff@claude-mod-repo
+```
+
+```bash
+claude plugin install session-end-unpin@claude-mod-repo
 ```
 
 In a Claude Code session the same commands are `/plugin marketplace add ulttla/claude-mod-repo` and `/plugin install context-meter@claude-mod-repo`.
@@ -116,7 +121,7 @@ A change takes effect in the next session, or after `/reload-plugins`.
 
 ### auto-pin
 
-When you start a new session in the Desktop app's Code tab, the mod pins it in the sidebar. You unpin it yourself when the work is done.
+When you start a new session in the Desktop app's Code tab, the mod pins it in the sidebar. You unpin it yourself when the work is done, or [`session-end-unpin`](#session-end-unpin) does when you end the session.
 
 - A session you reopen is left as it is, so one you unpinned stays unpinned.
 - When the sidebar is not reachable yet as the session starts, the mod tries again as each of your first three prompts starts and ends.
@@ -164,6 +169,27 @@ To change them in a terminal session, run `/plugin configure context-handoff@cla
 claude plugin install context-handoff@claude-mod-repo --config threshold=50
 ```
 
+### session-end-unpin
+
+The other half of `auto-pin`: when you ask to end a session and Claude finds nothing left in it, the mod unpins it.
+
+1. A message of yours that holds one of the phrases (`세션 종료` or `end session` by default, ignoring case and spaces) carries a note for Claude (Claude reads it; you don't see it): first do the project's end-of-session steps (progress notes, wiki or knowledge-base candidates, a close skill where the project has one), then judge whether the session can really end.
+2. Only when nothing waits on you (no question, decision or approval), no task is unfinished and no follow-up is worth proposing does Claude call the mod's `accept_session_end` tool, with one line on what it checked.
+3. When that turn ends with an answer, the mod unpins the session, shows a toast and leaves a dim `session-end-unpin:` line in the transcript.
+
+- The session stays pinned when the turn is interrupted or fails, or when Claude, in the same turn, asks you something (a question in its wrap-up, `AskUserQuestion`) or proposes or starts another session. The `session-end-unpin:` line says which.
+- When Claude has to ask you something first, your next two messages still belong to the ending: answer, and Claude can end the session then.
+- A message that only mentions a phrase, such as one about how sessions end, is left to Claude: the note tells it to ignore a mere mention.
+- The tool is in Claude's tool list in every session, and records nothing unless you asked to end the session.
+- In auto mode the unpin needs the same allow rule as `auto-pin`'s pin: `mcp__ccd_sidebar__set_pinned`.
+- Outside the Desktop app there is no sidebar to unpin from; the line says so.
+
+#### Options
+
+| Option | Default | What it does |
+| :- | :- | :- |
+| `phrases` | `세션 종료, end session` | Comma-separated phrases. A message holding one of them, ignoring case and spaces, asks to end the session |
+
 ### Uninstall
 
 ```bash
@@ -178,6 +204,10 @@ claude plugin uninstall auto-pin@claude-mod-repo
 claude plugin uninstall context-handoff@claude-mod-repo
 ```
 
+```bash
+claude plugin uninstall session-end-unpin@claude-mod-repo
+```
+
 ### License
 
 [MIT](LICENSE). Shared as is, without support.
@@ -186,13 +216,14 @@ claude plugin uninstall context-handoff@claude-mod-repo
 
 ## 한국어
 
-mod는 Claude Code의 모양과 동작을 바꾸는 플러그인입니다. 이 리포에는 mod 세 개가 들어 있고, 리포 자체가 플러그인 마켓플레이스 역할을 하므로 이름으로 골라 설치할 수 있습니다.
+mod는 Claude Code의 모양과 동작을 바꾸는 플러그인입니다. 이 리포에는 mod 네 개가 들어 있고, 리포 자체가 플러그인 마켓플레이스 역할을 하므로 이름으로 골라 설치할 수 있습니다.
 
 | Mod | 하는 일 | 동작하는 곳 |
 | :- | :- | :- |
 | [`context-meter`](context-meter) | git 브랜치, 컨텍스트 창이 얼마나 찼는지, 직전 턴이 얼마나 늘렸는지, 플랜 한도를 얼마나 썼는지를 입력창 위 한 줄로 표시 | 터미널, 데스크톱 앱 Code 탭 |
 | [`auto-pin`](auto-pin) | 새 세션이 시작되면 사이드바에 바로 고정 | 데스크톱 앱 Code 탭 |
 | [`context-handoff`](context-handoff) | 컨텍스트 창이 40% 차면 Claude가 인계 기록을 쓰게 하고, 새 세션(또는 컨텍스트 초기화 뒤)에서 기록을 읽어 이어감 | 터미널, 데스크톱 앱 Code 탭 |
+| [`session-end-unpin`](session-end-unpin) | 세션 종료를 요청했을 때 Claude가 남은 일이 없다고 판단하면 사이드바 고정을 해제 | 데스크톱 앱 Code 탭 |
 
 ### 요구 사항
 
@@ -219,6 +250,10 @@ claude plugin install auto-pin@claude-mod-repo
 
 ```bash
 claude plugin install context-handoff@claude-mod-repo
+```
+
+```bash
+claude plugin install session-end-unpin@claude-mod-repo
 ```
 
 Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/claude-mod-repo`, `/plugin install context-meter@claude-mod-repo`로 입력합니다.
@@ -294,7 +329,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 
 ### auto-pin
 
-데스크톱 앱 Code 탭에서 새 세션을 시작하면 사이드바에 고정합니다. 작업이 끝나면 직접 고정을 해제하면 됩니다.
+데스크톱 앱 Code 탭에서 새 세션을 시작하면 사이드바에 고정합니다. 작업이 끝나면 직접 고정을 해제하거나, 세션을 끝낼 때 [`session-end-unpin`](#session-end-unpin-1)이 해제합니다.
 
 - 다시 연 세션은 건드리지 않으므로, 고정을 해제한 세션은 해제된 채로 남습니다.
 - 세션이 시작될 때 사이드바에 아직 닿지 않으면, 처음 세 번의 프롬프트가 시작하고 끝날 때마다 다시 시도합니다.
@@ -342,6 +377,27 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 claude plugin install context-handoff@claude-mod-repo --config threshold=50
 ```
 
+### session-end-unpin
+
+`auto-pin`의 반대쪽입니다. 세션을 끝내자고 했을 때 Claude가 남은 일이 없다고 판단하면 고정을 해제합니다.
+
+1. 문구(기본값 `세션 종료` 또는 `end session`, 대소문자·띄어쓰기 무시)가 들어 있는 메시지에 Claude용 메모를 붙입니다(Claude만 읽고 화면에는 보이지 않음). 먼저 프로젝트의 세션 종료 절차(진행 기록, 위키·지식 베이스 후보, 프로젝트에 있으면 종료 스킬)를 하고, 그다음 세션을 정말 끝내도 되는지 판단하라는 내용입니다.
+2. 사용자를 기다리는 것(질문·결정·승인)이 없고, 끝나지 않은 작업이 없고, 제안할 후속 작업도 없을 때만 Claude가 mod의 `accept_session_end` 도구를 호출합니다. 무엇을 확인했는지 한 줄을 함께 넘깁니다.
+3. 그 턴이 응답으로 끝나면 mod가 세션 고정을 해제하고, 토스트를 띄우고, 대화에 흐릿한 `session-end-unpin:` 줄을 남깁니다.
+
+- 턴이 중단되거나 실패한 경우, 또는 같은 턴에서 Claude가 사용자에게 무언가를 묻거나(wrap-up의 질문, `AskUserQuestion`) 다른 세션을 제안·시작한 경우에는 고정을 유지합니다. `session-end-unpin:` 줄에 이유가 나옵니다.
+- Claude가 먼저 물어봐야 하는 경우 다음 두 메시지까지는 종료 요청이 이어집니다. 답하면 그때 세션을 끝낼 수 있습니다.
+- 세션 종료 방식에 관한 이야기처럼 문구가 들어 있기만 한 메시지는 Claude가 판단합니다. 메모에 그런 언급은 무시하라고 적혀 있습니다.
+- 도구는 모든 세션의 도구 목록에 있지만, 사용자가 종료를 요청하지 않았으면 아무것도 기록하지 않습니다.
+- auto 모드에서는 `auto-pin`의 고정과 같은 허용 규칙 `mcp__ccd_sidebar__set_pinned`가 필요합니다.
+- 데스크톱 앱 밖에는 해제할 사이드바가 없으며, 그 사실을 줄로 남깁니다.
+
+#### 옵션
+
+| 옵션 | 기본값 | 하는 일 |
+| :- | :- | :- |
+| `phrases` | `세션 종료, end session` | 쉼표로 구분한 문구. 대소문자·띄어쓰기를 무시하고 이 중 하나가 들어 있는 메시지를 세션 종료 요청으로 봅니다 |
+
 ### 제거
 
 ```bash
@@ -354,6 +410,10 @@ claude plugin uninstall auto-pin@claude-mod-repo
 
 ```bash
 claude plugin uninstall context-handoff@claude-mod-repo
+```
+
+```bash
+claude plugin uninstall session-end-unpin@claude-mod-repo
 ```
 
 ### 라이선스
