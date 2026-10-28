@@ -4,7 +4,7 @@
     "name": "ulttla"
   },
   "metadata": {
-    "description": "Small Claude Code mods: a context and plan-limit meter above the prompt, auto-pin for new desktop sessions, and an automatic hand-off when the context fills up"
+    "description": "Small Claude Code mods: a context and plan-limit meter above the prompt, auto-pin for new desktop sessions and unpin when one ends, and an automatic hand-off when the context fills up"
   },
   "plugins": [
     {
@@ -21,6 +21,11 @@
       "name": "context-handoff",
       "source": "./context-handoff",
       "description": "Past a context threshold, records a hand-off, resets the context (a compaction in place, or the desktop app's clear), and continues from the notes"
+    },
+    {
+      "name": "session-end-unpin",
+      "source": "./session-end-unpin",
+      "description": "Unpins the session from the desktop app's sidebar once you ask to end it and Claude finds nothing left"
     }
   ]
 }
