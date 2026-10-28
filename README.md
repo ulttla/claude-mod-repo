@@ -144,6 +144,7 @@ Each step shows a toast. With `compact` or `clear`, a message you had already qu
 
 - `/handoff-now` hands off right away, at any context size. It is a skill of the mod, so it runs in the turn you type it in, and with a new session that turn opens it. `/handoff-status` shows where the hand-off stands and what the mod did last.
 - The prompts the mod submits are shown in the transcript, marked `[context-handoff]`, and each step leaves a dim `context-handoff:` line there.
+- A message of yours that asks to end the session (`endPhrases`: `세션 종료` or `end session` by default, ignoring case and spaces) carries no hand-off, and its turn starts none: the session is ending. A hand-off already armed waits for the message after it.
 - With a new session: only a message you send carries the hand-off (typed, from the Desktop app or over Remote Control), not a slash command, another session's message or a background notice, nor a message you type while a turn is running. A session that shares another session's worktree cannot be moved to top level, so it stays under this one.
 - With the compaction through `/compact` (the Desktop app, or `compaction` set to `command`): the `/compact` line shows in the transcript, the resume follows once its compaction has run, and if nothing has been compacted within five minutes the mod gives up.
 - With the clear: the app is asked as the hand-off turn starts and clears as it ends; if it has not within eight seconds, the mod gives up. If a message you queued runs after the hand-off turn, the notes are recorded again. The resume is written to the mod's store, so the process the app starts next continues from the notes. The app starts that process only when you send your next message, however long after the clear: that message runs first, then the resume. Until then the conversation stays empty. A session started from another device cannot be cleared, so Remote Control is turned off for the clear and on again after the resume (`pauseRemoteControl`). Outside the Desktop app there is no app to clear, so the mod gives up after recording the notes.
@@ -162,6 +163,7 @@ Each step shows a toast. With `compact` or `clear`, a message you had already qu
 | `closePrompt` | empty | Replaces the built-in hand-off prompt and the close skill. `{percent}` and `{threshold}` are filled in |
 | `resumePrompt` | empty | Replaces the built-in prompt the work continues from: the new session's first prompt, or the one submitted after the reset |
 | `pauseRemoteControl` | on | With the clear: turn Remote Control off for it, and on again after the resume. Off, such a session is not cleared |
+| `endPhrases` | `세션 종료, end session` | Comma-separated phrases. A message of yours holding one, ignoring case and spaces, carries no hand-off, and its turn starts none. Empty, every message is handed off as usual |
 
 To change them in a terminal session, run `/plugin configure context-handoff@claude-mod-repo`, or pass them when you install:
 
@@ -181,6 +183,7 @@ The other half of `auto-pin`: when you ask to end a session and Claude finds not
 - When Claude has to ask you something first, your next two messages still belong to the ending: answer, and Claude can end the session then.
 - A message that only mentions a phrase, such as one about how sessions end, is left to Claude: the note tells it to ignore a mere mention.
 - The tool is in Claude's tool list in every session, and records nothing unless you asked to end the session.
+- With [`context-handoff`](#context-handoff) 0.5.0 or later, a message that asks to end is not handed off to a new session, even past its threshold. Keep both mods' phrases the same.
 - In auto mode the unpin needs the same allow rule as `auto-pin`'s pin: `mcp__ccd_sidebar__set_pinned`.
 - Outside the Desktop app there is no sidebar to unpin from; the line says so.
 
@@ -352,6 +355,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 
 - `/handoff-now`는 컨텍스트 크기와 상관없이 바로 인계합니다. mod에 딸린 스킬이라 입력한 그 턴에서 실행되므로, 새 세션 모드에서는 그 턴이 새 세션을 엽니다. `/handoff-status`는 인계가 어느 단계인지와 마지막으로 한 일을 보여 줍니다.
 - mod가 제출하는 프롬프트는 `[context-handoff]` 표시와 함께 대화에 보이고, 단계마다 흐릿한 `context-handoff:` 줄이 대화에 남습니다.
+- 세션을 끝내자는 메시지(`endPhrases`: 기본값 `세션 종료` 또는 `end session`, 대소문자·띄어쓰기 무시)에는 인계 지시를 붙이지 않고, 그 턴이 끝나도 인계를 시작하지 않습니다. 세션이 끝나는 중이기 때문입니다. 이미 대기 중인 인계는 그다음 메시지에서 진행합니다.
 - 새 세션일 때: 사용자가 보낸 메시지(직접 입력, 데스크톱 앱, Remote Control)만 인계 지시를 실어 갑니다. 슬래시 명령, 다른 세션의 메시지, 백그라운드 알림, 턴이 도는 중에 입력한 메시지는 해당하지 않습니다. 다른 세션의 worktree를 함께 쓰는 세션은 최상위로 옮길 수 없어 이 세션 아래에 남습니다.
 - `/compact`로 압축할 때(데스크톱 앱, 또는 `compaction`을 `command`로 둔 경우): `/compact` 줄이 대화에 보이고, 그 압축이 끝나면 재개합니다. 5분 안에 압축되지 않으면 포기합니다.
 - `clear`일 때: 인계 턴이 시작될 때 앱에 요청하고 턴이 끝날 때 비워집니다. 8초 안에 비워지지 않으면 포기합니다. 대기 중이던 메시지가 인계 턴 뒤에 실행되면 기록을 다시 씁니다. 재개 지시는 mod 저장소에 적어 두므로 앱이 다음에 띄우는 프로세스가 기록을 읽고 이어갑니다. 앱은 비운 뒤 아무리 시간이 지나도 다음 메시지를 보낼 때에야 그 프로세스를 띄우며, 그 메시지가 먼저 실행된 뒤 재개합니다. 그때까지 대화는 비어 있습니다. 다른 기기에서 시작한 세션은 비울 수 없으므로 비우는 동안 Remote Control을 끄고 재개 후 다시 켭니다(`pauseRemoteControl`). 데스크톱 앱 밖에는 비워 줄 앱이 없으므로 기록만 쓴 뒤 포기합니다.
@@ -370,6 +374,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 | `closePrompt` | 비어 있음 | 내장 인계 프롬프트와 스킬 지시를 대체. `{percent}`, `{threshold}`가 채워짐 |
 | `resumePrompt` | 비어 있음 | 작업을 이어가는 내장 프롬프트를 대체: 새 세션의 첫 프롬프트, 또는 초기화 뒤 제출하는 프롬프트 |
 | `pauseRemoteControl` | 켜짐 | `clear`일 때 비우는 동안 Remote Control을 끄고 재개 후 다시 켬. 끄면 그런 세션은 비우지 않음 |
+| `endPhrases` | `세션 종료, end session` | 쉼표로 구분한 문구. 대소문자·띄어쓰기를 무시하고 이 중 하나가 든 메시지에는 인계 지시를 붙이지 않고, 그 턴 뒤에 인계를 시작하지도 않음. 비우면 모든 메시지를 평소처럼 인계 |
 
 터미널 세션에서는 `/plugin configure context-handoff@claude-mod-repo`로 바꾸거나, 설치할 때 넘깁니다.
 
@@ -389,6 +394,7 @@ claude plugin install context-handoff@claude-mod-repo --config threshold=50
 - Claude가 먼저 물어봐야 하는 경우 다음 두 메시지까지는 종료 요청이 이어집니다. 답하면 그때 세션을 끝낼 수 있습니다.
 - 세션 종료 방식에 관한 이야기처럼 문구가 들어 있기만 한 메시지는 Claude가 판단합니다. 메모에 그런 언급은 무시하라고 적혀 있습니다.
 - 도구는 모든 세션의 도구 목록에 있지만, 사용자가 종료를 요청하지 않았으면 아무것도 기록하지 않습니다.
+- [`context-handoff`](#context-handoff-1) 0.5.0 이상과 함께 쓰면, 임계값을 넘었더라도 세션 종료 메시지는 새 세션으로 인계되지 않습니다. 두 mod의 문구를 같게 맞춰 두세요.
 - auto 모드에서는 `auto-pin`의 고정과 같은 허용 규칙 `mcp__ccd_sidebar__set_pinned`가 필요합니다.
 - 데스크톱 앱 밖에는 해제할 사이드바가 없으며, 그 사실을 줄로 남깁니다.
 
