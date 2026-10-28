@@ -852,3 +852,55 @@ test('/handoff-now opens a new session from the turn the user typed it in', asyn
   expect(submitted.length).toBe(0)
   expect(calls.filter((c) => c.tool === 'detach_session').map((c) => c.args)).toEqual([{ session_id: 'local_new' }])
 })
+
+// --- A message that asks to end the session ---
+
+const status = async ($: Engine) => (await $.command.run({ command: 'handoff-status' })).text
+
+test('a message that asks to end the session carries no hand-off, and the one after it does', async ($, on) => {
+  const { received, logged } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  await $.prompt.submit({ text: '정리됐으면 세션 종료', origin: { kind: 'sdk' }, wait: false })
+  expect(received[0].context).toEqual([])
+  expect(logged.at(-1)).toBe('context-handoff: your message asks to end the session, so it carries no hand-off')
+  await $.turn.start({ turnId: 't2', text: '정리됐으면 세션 종료' })
+  await $.turn.complete(turn('t2'))
+  expect(await status($)).toContain('Phase: armed.')
+
+  await $.prompt.submit({ text: 'one more fix', origin: { kind: 'sdk' }, wait: false })
+  expect(received[1].context.at(-1)).toContain('Do not act on it.')
+})
+
+test('the turn that ends the session starts no hand-off, and a later one does', async ($, on) => {
+  const context = { percent: 30 }
+  const { logged } = wire($, on, context, { app: appWith({ opened: false }) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.prompt.submit({ text: 'End  Session', origin: { kind: 'composer' }, wait: false })
+  await $.turn.start({ turnId: 't1', text: 'End  Session' })
+  context.percent = 45
+  await $.turn.complete(turn('t1'))
+  expect(logged.at(-1)).toBe('context-handoff: context at 45%, but this turn ends the session, so no hand-off starts')
+  expect(await status($)).toContain('Phase: idle.')
+
+  await $.prompt.submit({ text: 'actually, one more fix', origin: { kind: 'composer' }, wait: false })
+  await $.turn.start({ turnId: 't2', text: 'actually, one more fix' })
+  await $.turn.complete(turn('t2'))
+  expect(await status($)).toContain('Phase: armed.')
+})
+
+test('with compact, the turn that ends the session submits no hand-off', COMPACT, async ($, on) => {
+  const { submitted } = wire($, on, { percent: 45 })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.prompt.submit({ text: '세션종료', origin: { kind: 'sdk' }, wait: false })
+  await $.turn.start({ turnId: 't1', text: '세션종료' })
+  await $.turn.complete(turn('t1'))
+  expect(submitted.length).toBe(0)
+  expect(await status($)).toContain('Phase: idle.')
+})
+
+test('with no end phrases, a message that asks to end carries the hand-off', { options: { endPhrases: '' } }, async ($, on) => {
+  const { received } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  await $.prompt.submit({ text: '세션 종료', origin: { kind: 'sdk' }, wait: false })
+  expect(received[0].context.at(-1)).toContain('Do not act on it.')
+})

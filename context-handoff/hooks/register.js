@@ -58,6 +58,10 @@ let compactVia = null
 let compactWatchdog = null
 // True while Remote Control is turned off for the clear, to be turned on again after the resume
 let remoteControlPaused = false
+// Whether the user's message waiting for its turn asks to end the session, and the main loop's
+// turn that runs such a message: it carries no hand-off and starts none
+let endAsked = false
+let endTurnId = null
 // The last thing that happened, for /handoff-status
 let lastOutcome = 'nothing yet'
 
@@ -80,7 +84,22 @@ function settingsOf(options) {
     closePrompt: String(options.closePrompt ?? '').trim(),
     resumePrompt: String(options.resumePrompt ?? '').trim(),
     pauseRemoteControl: options.pauseRemoteControl !== false,
+    endPhrases: String(options.endPhrases ?? '세션 종료, end session')
+      .split(/[,\n]/)
+      .map((phrase) => squeezed(phrase))
+      .filter(Boolean),
   }
+}
+
+// Text compared without case or spaces, so 세션종료 and "End  Session" match
+function squeezed(text) {
+  return text.toLowerCase().replace(/\s+/g, '')
+}
+
+// Whether the text asks to end the session by one of the phrases
+function asksToEnd(cfg, text) {
+  const plain = squeezed(text)
+  return cfg.endPhrases.some((phrase) => plain.includes(phrase))
 }
 
 function fillIn(text, percent, cfg) {
@@ -562,11 +581,18 @@ export function register(on, options) {
   })
 
   // (session) The user's next message after the threshold carries the hand-off instructions,
-  // read by the model beside it. Not a command, nor one typed over a running turn
+  // read by the model beside it. Not a command, nor one typed over a running turn, nor one that
+  // asks to end the session, which leaves the hand-off armed for the message after it
   on('prompt.submit', async ($, e, next) => {
     const text = typeof e.text === 'string' ? e.text : ''
     const fromUser = USER_ORIGINS.includes(e.origin?.kind)
-    if (phase !== 'armed' || !fromUser || e.turnId !== undefined || text.trimStart().startsWith('/')) return next(e)
+    if (!fromUser || e.turnId !== undefined || text.trimStart().startsWith('/')) return next(e)
+    endAsked = asksToEnd(cfg, text)
+    if (phase !== 'armed') return next(e)
+    if (endAsked) {
+      note($, 'your message asks to end the session, so it carries no hand-off')
+      return next(e)
+    }
     const percent = (await readPercent($)) ?? triggeredAt ?? cfg.threshold
     const instructions = closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), 'carry')
     await prepare($, cfg, 'user', percent)
@@ -595,7 +621,11 @@ export function register(on, options) {
   // The turn that runs the hand-off: for a prompt of this mod's, the one whose text carries the
   // tag; for one the user started, the next to start
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) currentTurnId = e.turnId
+    if (e.agentId === undefined) {
+      currentTurnId = e.turnId
+      endTurnId = endAsked ? e.turnId : null
+      endAsked = false
+    }
     if (phase === 'closing' && closeTurnId === null && e.agentId === undefined) {
       const tagged = typeof e.text === 'string' && e.text.includes(MARK)
       if (closeBy === 'user' || tagged) await closeTurnStarted($, cfg, e.turnId)
@@ -638,6 +668,11 @@ export function register(on, options) {
     const percent = await readPercent($)
     if (percent === null || percent < cfg.threshold) return out
     if (triggeredAt !== null && percent < triggeredAt + cfg.step) return out
+    // The session is ending: nothing is left to carry on
+    if (e.turnId === endTurnId) {
+      note($, `context at ${Math.round(percent)}%, but this turn ends the session, so no hand-off starts`)
+      return out
+    }
     if (cfg.reset === 'session') arm($, percent)
     else await begin($, cfg, percent, `context at ${Math.round(percent)}%, past ${cfg.threshold}%`)
     return out

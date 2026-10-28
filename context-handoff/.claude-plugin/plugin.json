@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Past a context threshold, records a hand-off and continues the work from the notes: in a new desktop-app session by default, or in this one after a compaction or the app's clear",
   "author": {
     "name": "ulttla"
@@ -79,6 +79,12 @@
       "title": "Pause Remote Control for the clear",
       "description": "A session serving Remote Control cannot be cleared. On, the mod turns Remote Control off for the clear and on again once the fresh conversation has run its first turn.",
       "default": true
+    },
+    "endPhrases": {
+      "type": "string",
+      "title": "Phrases that end the session",
+      "description": "Comma-separated. A message of yours holding one of them, ignoring case and spaces, carries no hand-off, and its turn starts none: the session is ending. Empty, every message is handed off as usual.",
+      "default": "세션 종료, end session"
     }
   }
 }
