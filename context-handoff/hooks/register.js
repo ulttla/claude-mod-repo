@@ -62,6 +62,9 @@ let remoteControlPaused = false
 // turn that runs such a message: it carries no hand-off and starts none
 let endAsked = false
 let endTurnId = null
+// /handoff-now set the hand-off up as it was submitted; the skill's text, where this mod reads
+// it, is still to come
+let handoffNowAsked = false
 // The last thing that happened, for /handoff-status
 let lastOutcome = 'nothing yet'
 
@@ -363,6 +366,35 @@ function arm($, percent) {
   })
 }
 
+// /handoff-now, as it is submitted: the hand-off is set up here rather than where the skill's
+// text is read (skill.prompt), since an organization's security default keeps that event from
+// the plugins a person installs. The instructions as configured ride along as context; where
+// they don't reach, the skill's own text holds the default ones. Its turn is the next to start
+async function handOffNow($, cfg, e, next) {
+  if (phase !== 'idle' && phase !== 'armed') {
+    return { drop: `${NAME}: a hand-off is already in progress (${phase})` }
+  }
+  const was = { phase, triggeredAt }
+  const percent = (await readPercent($)) ?? 0
+  await prepare($, cfg, 'user', percent)
+  handoffNowAsked = true
+  note($, 'hand-off started: asked by /handoff-now')
+  $.ui.toast(`${NAME}: asked by /handoff-now, recording the hand-off`)
+  const instructions =
+    `${MARK} These are the /handoff-now instructions for this session's settings; where the skill's text differs, ` +
+    `follow these. ${closePromptFor(cfg, percent, await hasCommand($, cfg.closeCommand), 'asked')}`
+  const out = await next({ ...e, context: [...(e.context ?? []), instructions] })
+  // The command did not enter: the hand-off stands as it was
+  if (out && out.drop !== undefined && phase === 'closing' && closeTurnId === null) {
+    phase = was.phase
+    triggeredAt = was.triggeredAt
+    closeBy = null
+    linkedBefore = null
+    handoffNowAsked = false
+  }
+  return out
+}
+
 // Submit the hand-off prompt; its turn is found by the tag at turn.start
 async function begin($, cfg, percent, why) {
   await prepare($, cfg, 'prompt', percent)
@@ -580,12 +612,14 @@ export function register(on, options) {
     return next(e)
   })
 
-  // (session) The user's next message after the threshold carries the hand-off instructions,
-  // read by the model beside it. Not a command, nor one typed over a running turn, nor one that
-  // asks to end the session, which leaves the hand-off armed for the message after it
+  // /handoff-now sets the hand-off up as it is submitted. (session) The user's next message after
+  // the threshold carries the hand-off instructions, read by the model beside it. Not a command,
+  // nor one typed over a running turn, nor one that asks to end the session, which leaves the
+  // hand-off armed for the message after it
   on('prompt.submit', async ($, e, next) => {
     const text = typeof e.text === 'string' ? e.text : ''
     const fromUser = USER_ORIGINS.includes(e.origin?.kind)
+    if (fromUser && e.command !== undefined && HANDOFF_SKILL.test(e.command.name)) return handOffNow($, cfg, e, next)
     if (!fromUser || e.turnId !== undefined || text.trimStart().startsWith('/')) return next(e)
     endAsked = asksToEnd(cfg, text)
     if (phase !== 'armed') return next(e)
@@ -602,11 +636,17 @@ export function register(on, options) {
     return out
   }).catch(($, e, next) => next(e)) // A failure here never holds up the user's message
 
-  // /handoff-now: the skill's own text stands in when this mod is not loaded; here it reads the
-  // hand-off as configured. It runs in the turn the user typed it in, which may have started
+  // /handoff-now: the skill's own text stands in when this mod is not loaded, or where an
+  // organization's security default keeps this hook from it; here it reads the hand-off as
+  // configured. It runs in the turn the user typed it in, which may have started
   on('skill.prompt', async ($, e, next) => {
     const out = await next(e)
     if (!HANDOFF_SKILL.test(e.skill)) return out
+    if (handoffNowAsked) {
+      // Already set up as it was submitted
+      handoffNowAsked = false
+      return { text: closePromptFor(cfg, triggeredAt ?? 0, await hasCommand($, cfg.closeCommand), 'asked') }
+    }
     if (phase !== 'idle' && phase !== 'armed') {
       return { text: `${MARK} A hand-off is already in progress (${phase}). Say so in one line and stop.` }
     }
