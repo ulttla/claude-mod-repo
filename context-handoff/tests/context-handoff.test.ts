@@ -904,3 +904,54 @@ test('with no end phrases, a message that asks to end carries the hand-off', { o
   await $.prompt.submit({ text: '세션 종료', origin: { kind: 'sdk' }, wait: false })
   expect(received[0].context.at(-1)).toContain('Do not act on it.')
 })
+
+// --- /handoff-now where an organization's security default keeps skill.prompt from the mod ---
+
+const HANDOFF_NOW = {
+  text: '/context-handoff:handoff-now',
+  origin: { kind: 'sdk' },
+  wait: false,
+  command: { name: 'context-handoff:handoff-now', args: '' },
+} as const
+
+test('/handoff-now is set up as it is submitted: with no skill.prompt the new session is still moved and this one unpinned', async ($, on) => {
+  const state = { opened: false }
+  const { received, calls, logged } = wire($, on, { percent: 12 }, { app: appWith(state) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.prompt.submit(HANDOFF_NOW)
+  const instructions = received[0].context.at(-1) ?? ''
+  expect(instructions).toContain("These are the /handoff-now instructions for this session's settings")
+  expect(instructions).toContain('12% full; a hand-off was asked for with /handoff-now.')
+  expect(instructions).toContain('mcp__ccd_session__start_session')
+
+  await $.turn.start({ turnId: 't1', text: '/context-handoff:handoff-now' })
+  state.opened = true
+  await $.turn.complete(turn('t1'))
+  expect(calls.filter((c) => c.tool === 'detach_session').map((c) => c.args)).toEqual([{ session_id: 'local_new' }])
+  expect(calls.filter((c) => c.tool === 'set_pinned').map((c) => c.args)).toEqual([{ session_id: 'self', pinned: false }])
+  expect(logged.at(-1)).toBe('context-handoff: the work continues in the session "Phase C of the build" (local_new)')
+})
+
+test('where skill.prompt still reaches the mod, it reads the configured text and sets nothing up twice', async ($, on) => {
+  const state = { opened: false }
+  const { calls, logged } = wire($, on, { percent: 12 }, { app: appWith(state) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.prompt.submit(HANDOFF_NOW)
+  await $.turn.start({ turnId: 't1', text: '/context-handoff:handoff-now' })
+  const { text } = await $.skill.prompt({ skill: 'context-handoff:handoff-now', text: 'the static text' })
+  expect(text).toContain('12% full; a hand-off was asked for with /handoff-now.')
+  expect(text.includes('already in progress')).toBe(false)
+  state.opened = true
+  await $.turn.complete(turn('t1'))
+  expect(logged.filter((line) => line.includes('hand-off started')).length).toBe(1)
+  expect(calls.filter((c) => c.tool === 'detach_session').length).toBe(1)
+})
+
+test('/handoff-now while a hand-off runs is refused as it is submitted', async ($, on) => {
+  wire($, on, { percent: 12 }, { app: appWith({ opened: false }) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.prompt.submit(HANDOFF_NOW)
+  await $.turn.start({ turnId: 't1', text: '/context-handoff:handoff-now' })
+  const again = await $.prompt.submit(HANDOFF_NOW)
+  expect(again).toEqual({ drop: 'context-handoff: a hand-off is already in progress (closing)' })
+})
