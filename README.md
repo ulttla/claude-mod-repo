@@ -143,6 +143,7 @@ After each turn it reads how full the context window is. Past the threshold (40%
 Each step shows a toast. With `compact` or `clear`, a message you had already queued runs first. If you interrupt the hand-off turn, or the reset fails, the mod gives up, says why, and tries again once the context has grown by another 5 points.
 
 - `/handoff-now` hands off right away, at any context size. It is a skill of the mod, so it runs in the turn you type it in, and with a new session that turn opens it. `/handoff-status` shows where the hand-off stands and what the mod did last.
+- `/handoff-off` turns the automatic hand-off off for this session alone, for when it is about to end just past the threshold: a hand-off armed for your next message is called off, and no later turn starts one. A hand-off whose turn is already asked for goes on; interrupt that turn to stop it. `/handoff-now` still hands off, and `/handoff-on` turns the automatic hand-off on again (even with `enabled` off), started by the next turn to end past the threshold. Neither outlives the conversation: after a `/clear` of yours, `enabled` decides again.
 - On Team and Enterprise plans, and on machines with managed settings, Claude Code's built-in security default (`cc-plugin-sec-default`) keeps some events from the plugins a person installs, the skill's text among them. So the mod sets `/handoff-now` up as you submit it, and its configured instructions ride along beside the skill's text, which holds the default ones. The compaction it then cannot watch is judged from how full the context is afterwards.
 - The prompts the mod submits are shown in the transcript, marked `[context-handoff]`, and each step leaves a dim `context-handoff:` line there.
 - A message of yours that asks to end the session (`endPhrases`: `세션 종료` or `end session` by default, ignoring case and spaces) carries no hand-off, and its turn starts none: the session is ending. A hand-off already armed waits for the message after it.
@@ -154,7 +155,7 @@ Each step shows a toast. With `compact` or `clear`, a message you had already qu
 
 | Option | Default | What it does |
 | :- | :- | :- |
-| `enabled` | on | Hand off on its own past the threshold. Off, only `/handoff-now` hands off |
+| `enabled` | on | Hand off on its own past the threshold. Off, only `/handoff-now` hands off. `/handoff-off` and `/handoff-on` override it for one session |
 | `threshold` | 40 | How full the context window is, in percent, before the hand-off starts |
 | `retriggerStep` | 5 | After an interrupted or failed hand-off, try again once the context has grown this many points |
 | `reset` | `session` | Where the work continues: `session` (a new Desktop app session, opened with your next message, or a compaction here where none can be opened), `compact` (in place, process and settings kept, no input needed) or `clear` (the Desktop app's clear: a fresh conversation, continued only after your next message) |
@@ -355,6 +356,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 단계마다 토스트로 알립니다. `compact`·`clear`일 때 이미 대기 중이던 메시지가 있으면 그것이 먼저 실행됩니다. 인계 턴을 중단하거나 초기화에 실패하면 포기하고 이유를 알린 뒤, 컨텍스트가 5포인트 더 차면 다시 시도합니다.
 
 - `/handoff-now`는 컨텍스트 크기와 상관없이 바로 인계합니다. mod에 딸린 스킬이라 입력한 그 턴에서 실행되므로, 새 세션 모드에서는 그 턴이 새 세션을 엽니다. `/handoff-status`는 인계가 어느 단계인지와 마지막으로 한 일을 보여 줍니다.
+- `/handoff-off`는 이 세션에서만 자동 인계를 끕니다. 임계값을 막 넘었는데 곧 세션을 끝낼 때 씁니다. 다음 메시지를 기다리던 인계는 취소되고, 이후 어떤 턴도 인계를 시작하지 않습니다. 인계 턴이 이미 요청된 뒤라면 그 인계는 계속되며, 멈추려면 그 턴을 중단합니다. `/handoff-now`는 그대로 쓸 수 있고, `/handoff-on`은 자동 인계를 다시 켭니다(`enabled`가 꺼져 있어도). 다시 켜면 임계값을 넘긴 채 끝나는 다음 턴에서 인계가 시작됩니다. 둘 다 대화가 끝나면 사라지며, 직접 `/clear`하면 다시 `enabled`를 따릅니다.
 - Team·Enterprise 플랜이나 managed settings가 있는 PC에서는 Claude Code 내장 보안 기본값(`cc-plugin-sec-default`)이 사람이 설치한 플러그인에게 일부 이벤트(스킬 본문 포함)를 넘기지 않습니다. 그래서 mod는 `/handoff-now`를 입력하는 순간 인계를 준비하고, 설정대로 만든 지시를 스킬 본문(기본 지시) 옆에 함께 붙입니다. 이때 볼 수 없는 압축은 압축 뒤 컨텍스트가 얼마나 찼는지로 판단합니다.
 - mod가 제출하는 프롬프트는 `[context-handoff]` 표시와 함께 대화에 보이고, 단계마다 흐릿한 `context-handoff:` 줄이 대화에 남습니다.
 - 세션을 끝내자는 메시지(`endPhrases`: 기본값 `세션 종료` 또는 `end session`, 대소문자·띄어쓰기 무시)에는 인계 지시를 붙이지 않고, 그 턴이 끝나도 인계를 시작하지 않습니다. 세션이 끝나는 중이기 때문입니다. 이미 대기 중인 인계는 그다음 메시지에서 진행합니다.
@@ -366,7 +368,7 @@ claude plugin install context-meter@claude-mod-repo --config showModel=true --co
 
 | 옵션 | 기본값 | 하는 일 |
 | :- | :- | :- |
-| `enabled` | 켜짐 | 임계값을 넘으면 자동으로 인계. 끄면 `/handoff-now`로만 인계 |
+| `enabled` | 켜짐 | 임계값을 넘으면 자동으로 인계. 끄면 `/handoff-now`로만 인계. `/handoff-off`·`/handoff-on`으로 세션 하나만 바꿀 수 있음 |
 | `threshold` | 40 | 인계를 시작하는 컨텍스트 창 사용률(%) |
 | `retriggerStep` | 5 | 중단되거나 실패한 인계를 컨텍스트가 몇 포인트 더 찼을 때 다시 시도할지 |
 | `reset` | `session` | 작업을 이어갈 곳: `session`(다음 메시지와 함께 여는 데스크톱 앱 새 세션, 열 수 없으면 여기서 압축), `compact`(제자리 압축, 프로세스·설정 유지, 입력 불필요) 또는 `clear`(데스크톱 앱의 비우기: 새 대화, 다음 메시지를 보내야 이어감) |

@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Past a context threshold, records a hand-off and continues the work from the notes: in a new desktop-app session by default, or in this one after a compaction or the app's clear",
   "author": {
     "name": "ulttla"
@@ -9,7 +9,7 @@
     "enabled": {
       "type": "boolean",
       "title": "Automatic hand-off",
-      "description": "Hand off on its own once the context window passes the threshold. Off, /handoff-now still works.",
+      "description": "Hand off on its own once the context window passes the threshold. Off, /handoff-now still works. /handoff-off and /handoff-on override it for one session.",
       "default": true
     },
     "threshold": {

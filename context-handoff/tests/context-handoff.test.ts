@@ -947,6 +947,84 @@ test('where skill.prompt still reaches the mod, it reads the configured text and
   expect(calls.filter((c) => c.tool === 'detach_session').length).toBe(1)
 })
 
+// --- /handoff-off and /handoff-on, for this session alone ---
+
+test('/handoff-off calls off the armed hand-off, and no later turn starts one', async ($, on) => {
+  const context = { percent: 45 }
+  const { received, logged } = wire($, on, context, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  expect(await status($)).toContain('Phase: armed.')
+
+  const off = await $.command.run({ command: 'handoff-off' })
+  expect(off.text).toContain('Automatic hand-off is off for this session, and your next message is not handed off.')
+  expect(logged.at(-1)).toBe('context-handoff: automatic hand-off off for this session; the armed hand-off is called off')
+  expect(await status($)).toBe(
+    'Phase: idle. Context: 45% (threshold 40%). Automatic hand-off: off for this session. Reset: session. ' +
+      'Last: automatic hand-off off for this session; the armed hand-off is called off.',
+  )
+
+  // The next message is worked on here, and no turn arms the hand-off again, however full the context
+  await $.prompt.submit({ text: 'commit it', origin: { kind: 'sdk' }, wait: false })
+  expect(received[0].context).toEqual([])
+  context.percent = 70
+  await $.turn.start({ turnId: 't2', text: 'commit it' })
+  await $.turn.complete(turn('t2'))
+  expect(await status($)).toContain('Phase: idle.')
+})
+
+test('/handoff-off still lets /handoff-now hand off', async ($, on) => {
+  const state = { opened: false }
+  const { calls } = wire($, on, { percent: 45 }, { app: appWith(state) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'handoff-off' })
+  await $.prompt.submit(HANDOFF_NOW)
+  await $.turn.start({ turnId: 't1', text: '/context-handoff:handoff-now' })
+  state.opened = true
+  await $.turn.complete(turn('t1'))
+  expect(calls.filter((c) => c.tool === 'detach_session').length).toBe(1)
+})
+
+test('/handoff-off while the hand-off turn is asked for leaves it running', async ($, on) => {
+  wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  await $.prompt.submit({ text: 'now do Phase C', origin: { kind: 'sdk' }, wait: false })
+  const off = await $.command.run({ command: 'handoff-off' })
+  expect(off.text).toContain('a hand-off is already in progress (closing). Interrupt its turn (Esc) to stop it.')
+  expect(await status($)).toContain('Phase: closing.')
+})
+
+test('/handoff-on arms the hand-off again at the next turn past the threshold, even with the option off', { options: { enabled: false } }, async ($, on) => {
+  wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  expect(await status($)).toContain('Phase: idle.')
+  expect(await status($)).toContain('Automatic hand-off: off.')
+
+  const on_ = await $.command.run({ command: 'handoff-on' })
+  expect(on_.text).toBe('Automatic hand-off is on for this session: the next turn to end past 40% starts it.')
+  await $.turn.start({ turnId: 't2', text: 'go on' })
+  await $.turn.complete(turn('t2'))
+  expect(await status($)).toContain('Phase: armed.')
+  expect(await status($)).toContain('Automatic hand-off: on for this session.')
+})
+
+test('/handoff-on after /handoff-off arms again at once, where the step would have waited', async ($, on) => {
+  wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  await $.command.run({ command: 'handoff-off' })
+  await $.command.run({ command: 'handoff-on' })
+  await $.turn.start({ turnId: 't2', text: 'go on' })
+  await $.turn.complete(turn('t2'))
+  expect(await status($)).toContain('Phase: armed.')
+})
+
+test('a conversation the user clears goes back to the option', async ($, on) => {
+  wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  await $.command.run({ command: 'handoff-off' })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect(await status($)).toContain('Automatic hand-off: on.')
+})
+
 test('/handoff-now while a hand-off runs is refused as it is submitted', async ($, on) => {
   wire($, on, { percent: 12 }, { app: appWith({ opened: false }) })
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })

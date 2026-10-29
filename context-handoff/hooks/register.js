@@ -65,6 +65,9 @@ let endTurnId = null
 // /handoff-now set the hand-off up as it was submitted; the skill's text, where this mod reads
 // it, is still to come
 let handoffNowAsked = false
+// What /handoff-off (false) or /handoff-on (true) said about the automatic hand-off for this
+// session, over the `enabled` option; null until one is typed
+let sessionAuto = null
 // The last thing that happened, for /handoff-status
 let lastOutcome = 'nothing yet'
 
@@ -92,6 +95,12 @@ function settingsOf(options) {
       .map((phrase) => squeezed(phrase))
       .filter(Boolean),
   }
+}
+
+// Whether the hand-off starts on its own in this session: as /handoff-off or /handoff-on said,
+// else as the option has it
+function autoOn(cfg) {
+  return sessionAuto ?? cfg.enabled
 }
 
 // Text compared without case or spaces, so 세션종료 and "End  Session" match
@@ -361,9 +370,10 @@ function arm($, percent) {
   phase = 'armed'
   triggeredAt = percent
   note($, `context at ${Math.round(percent)}%: your next message goes to a new session, after the hand-off`)
-  $.ui.toast(`${NAME}: context at ${Math.round(percent)}%, your next message hands off to a new session`, {
-    timeoutMs: 8000,
-  })
+  $.ui.toast(
+    `${NAME}: context at ${Math.round(percent)}%, your next message hands off to a new session (/handoff-off to stay here)`,
+    { timeoutMs: 8000 },
+  )
 }
 
 // /handoff-now, as it is submitted: the hand-off is set up here rather than where the skill's
@@ -608,6 +618,14 @@ export function register(on, options) {
       name: 'handoff-status',
       description: 'Show where the automatic hand-off stands and what it did last',
     })
+    await $.command.register({
+      name: 'handoff-off',
+      description: 'Turn the automatic hand-off off for this session; /handoff-now still hands off',
+    })
+    await $.command.register({
+      name: 'handoff-on',
+      description: 'Turn the automatic hand-off on again for this session',
+    })
     await resumeIfPending($, cfg)
     return next(e)
   })
@@ -703,7 +721,7 @@ export function register(on, options) {
     if (phase !== 'idle') return out
     // The resume turn has run: the session may serve Remote Control again
     await restoreRemoteControl($)
-    if (!cfg.enabled || ended !== 'answer') return out
+    if (!autoOn(cfg) || ended !== 'answer') return out
 
     const percent = await readPercent($)
     if (percent === null || percent < cfg.threshold) return out
@@ -742,9 +760,13 @@ export function register(on, options) {
       phase = 'resuming'
       cancelTimers()
       resumeTimer = $.clock.after(3000, () => submitResume($, cfg))
-    } else if (e.reason !== 'clear') {
-      phase = 'idle'
-      cancelTimers()
+    } else {
+      // A conversation the mod did not reset for its hand-off: /handoff-off or /handoff-on spoke for the last one
+      sessionAuto = null
+      if (e.reason !== 'clear') {
+        phase = 'idle'
+        cancelTimers()
+      }
     }
     return next(e)
   })
@@ -762,7 +784,44 @@ export function register(on, options) {
     return {
       text:
         `Phase: ${phase}. Context: ${fill} (threshold ${cfg.threshold}%). ` +
-        `Automatic hand-off: ${cfg.enabled ? 'on' : 'off'}. Reset: ${cfg.reset}. Last: ${lastOutcome}.`,
+        `Automatic hand-off: ${autoOn(cfg) ? 'on' : 'off'}${sessionAuto === null ? '' : ' for this session'}. ` +
+        `Reset: ${cfg.reset}. Last: ${lastOutcome}.`,
+    }
+  })
+
+  // /handoff-off: this session goes on, or ends, with no hand-off of its own, as when it is about
+  // to close just past the threshold. One armed for your next message is called off; one whose
+  // turn is already asked for goes on, and interrupting that turn gives it up
+  on('command.run', { command: 'handoff-off' }, async ($) => {
+    sessionAuto = false
+    const after = '/handoff-on turns it on again, and /handoff-now still hands off.'
+    if (phase === 'armed') {
+      phase = 'idle'
+      note($, 'automatic hand-off off for this session; the armed hand-off is called off')
+      return {
+        text: `Automatic hand-off is off for this session, and your next message is not handed off. ${after}`,
+      }
+    }
+    if (phase !== 'idle') {
+      note($, `automatic hand-off off for this session; the hand-off in progress (${phase}) goes on`)
+      return {
+        text:
+          `Automatic hand-off is off for this session from now on, but a hand-off is already in progress (${phase}). ` +
+          `Interrupt its turn (Esc) to stop it. ${after}`,
+      }
+    }
+    note($, 'automatic hand-off off for this session')
+    return { text: `Automatic hand-off is off for this session. ${after}` }
+  })
+
+  // /handoff-on: the hand-off starts on its own again, even where the option has it off. The next
+  // turn to end past the threshold starts it, however far the last one had got
+  on('command.run', { command: 'handoff-on' }, async ($) => {
+    sessionAuto = true
+    if (phase === 'idle') triggeredAt = null
+    note($, 'automatic hand-off on for this session')
+    return {
+      text: `Automatic hand-off is on for this session: the next turn to end past ${cfg.threshold}% starts it.`,
     }
   })
 }
