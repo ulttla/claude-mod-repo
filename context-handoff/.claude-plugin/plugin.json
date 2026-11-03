@@ -1,6 +1,6 @@
 {
   "name": "context-handoff",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Past a context threshold, records a hand-off and continues the work from the notes: in a new desktop-app session by default, or in this one after a compaction or the app's clear",
   "author": {
     "name": "ulttla"
@@ -83,8 +83,8 @@
     "endPhrases": {
       "type": "string",
       "title": "Phrases that end the session",
-      "description": "Comma-separated. A message of yours holding one of them, ignoring case and spaces, carries no hand-off, and its turn starts none: the session is ending. Empty, every message is handed off as usual.",
-      "default": "세션 종료, end session"
+      "description": "Comma-separated. A message of yours holding every word of one of them, in any order and ignoring case, carries no hand-off, and its turn starts none: the session is ending. An English word counts only on its own (end, not send). Empty, every message is handed off as usual.",
+      "default": "세션 종료, session 종료, 세션 end, end session"
     }
   }
 }

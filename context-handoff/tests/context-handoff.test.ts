@@ -898,6 +898,25 @@ test('with compact, the turn that ends the session submits no hand-off', COMPACT
   expect(await status($)).toContain('Phase: idle.')
 })
 
+test('a session word and an end word ask to end, in any order and either language', async ($, on) => {
+  const { received } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+  await pastThreshold($)
+  const asks = ['Session 종료', '세션을 종료해 주세요', '세션 종료해줘', '종료해 세션', 'End the session', 'session end']
+  // Each leaves the hand-off armed for the next message
+  for (const text of asks) await $.prompt.submit({ text, origin: { kind: 'sdk' }, wait: false })
+  expect(received.map((r) => r.context.length)).toEqual(asks.map(() => 0))
+  expect(await status($)).toContain('Phase: armed.')
+})
+
+for (const text of ['종료', '세션', 'send the session log', 'weekend session']) {
+  test(`"${text}" does not ask to end: one word alone, or end inside another word`, async ($, on) => {
+    const { received } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
+    await pastThreshold($)
+    await $.prompt.submit({ text, origin: { kind: 'sdk' }, wait: false })
+    expect(received[0].context.at(-1)).toContain('Do not act on it.')
+  })
+}
+
 test('with no end phrases, a message that asks to end carries the hand-off', { options: { endPhrases: '' } }, async ($, on) => {
   const { received } = wire($, on, { percent: 45 }, { app: appWith({ opened: false }) })
   await pastThreshold($)

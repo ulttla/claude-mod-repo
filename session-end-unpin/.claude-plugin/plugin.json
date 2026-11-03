@@ -1,6 +1,6 @@
 {
   "name": "session-end-unpin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Unpins the session from the desktop app's sidebar once you ask to end it and Claude finds nothing left: the end-of-session steps done, no question, decision or follow-up waiting",
   "author": {
     "name": "ulttla"
@@ -9,8 +9,8 @@
     "phrases": {
       "type": "string",
       "title": "Phrases that ask to end the session",
-      "description": "Comma-separated. A message holding one of them, ignoring case and spaces, asks to end the session.",
-      "default": "세션 종료, end session"
+      "description": "Comma-separated. A message holding every word of one of them, in any order and ignoring case, asks to end the session. An English word counts only on its own (end, not send).",
+      "default": "세션 종료, session 종료, 세션 end, end session"
     }
   }
 }
