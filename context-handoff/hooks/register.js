@@ -90,10 +90,10 @@ function settingsOf(options) {
     closePrompt: String(options.closePrompt ?? '').trim(),
     resumePrompt: String(options.resumePrompt ?? '').trim(),
     pauseRemoteControl: options.pauseRemoteControl !== false,
-    endPhrases: String(options.endPhrases ?? '세션 종료, end session')
+    endPhrases: String(options.endPhrases ?? '세션 종료, session 종료, 세션 end, end session')
       .split(/[,\n]/)
-      .map((phrase) => squeezed(phrase))
-      .filter(Boolean),
+      .map((phrase) => wordsOf(phrase))
+      .filter((words) => words.length > 0),
   }
 }
 
@@ -103,15 +103,24 @@ function autoOn(cfg) {
   return sessionAuto ?? cfg.enabled
 }
 
-// Text compared without case or spaces, so 세션종료 and "End  Session" match
-function squeezed(text) {
-  return text.toLowerCase().replace(/\s+/g, '')
+// A phrase's words, each looked for in the text on its own
+function wordsOf(phrase) {
+  return phrase.toLowerCase().split(/\s+/).filter(Boolean)
 }
 
-// Whether the text asks to end the session by one of the phrases
+// Whether the lower-cased text holds the word. One in Latin letters stands on its own, an English
+// ending allowed (end and ended, not send, weekend or endpoint); any other may sit inside a longer
+// word, so 세션을 and 종료해 hold 세션 and 종료
+function holds(text, word) {
+  if (!/^[a-z0-9]+$/.test(word)) return text.includes(word)
+  return new RegExp(`(?<![a-z0-9])${word}(?:s|ed|ing)?(?![a-z0-9])`).test(text)
+}
+
+// Whether the text asks to end the session: it holds all the words of one of the phrases, in any
+// order and with anything between
 function asksToEnd(cfg, text) {
-  const plain = squeezed(text)
-  return cfg.endPhrases.some((phrase) => plain.includes(phrase))
+  const plain = text.toLowerCase()
+  return cfg.endPhrases.some((words) => words.every((word) => holds(plain, word)))
 }
 
 function fillIn(text, percent, cfg) {

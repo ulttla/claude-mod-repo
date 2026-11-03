@@ -99,6 +99,36 @@ test('the phrase matches in a longer message, ignoring case and spaces', async (
   expect(received.map((r) => r.context.length)).toEqual([1, 1])
 })
 
+test('a session word and an end word ask to end, in any order and either language', async ($, on) => {
+  const { received } = wire(on)
+  await $.session.start(START)
+  const asks = [
+    '세션 종료',
+    'Session 종료',
+    'session 종료',
+    '세션을 종료해 주세요',
+    '세션 종료해줘',
+    '종료해 세션',
+    'end session',
+    'End the session',
+    'session end',
+    'SESSION ENDED',
+  ]
+  for (const [i, text] of asks.entries()) await say($, `t${i}`, text)
+  expect(received.map((r) => r.context.join(' ').includes('This message asks to end the session'))).toEqual(
+    asks.map(() => true),
+  )
+})
+
+test('one word alone, or end inside another word, does not ask to end', async ($, on) => {
+  const { received } = wire(on)
+  await $.session.start(START)
+  for (const text of ['종료', '세션', 'send the session log', 'weekend session', 'the session endpoint']) {
+    await $.prompt.submit({ text, origin: { kind: 'sdk' }, wait: false })
+  }
+  expect(received.map((r) => r.context.length)).toEqual([0, 0, 0, 0, 0])
+})
+
 test('the phrases come from the option', { options: { phrases: 'wrap it up, done for today' } }, async ($, on) => {
   const { received } = wire(on)
   await $.session.start(START)

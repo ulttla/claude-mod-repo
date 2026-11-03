@@ -29,16 +29,24 @@ function phrasesOf(options) {
     .split(/[,\n]/)
     .map((phrase) => phrase.trim())
     .filter(Boolean)
-  return phrases.length > 0 ? phrases : ['세션 종료']
+  return phrases.length > 0 ? phrases : ['세션 종료', 'session 종료', '세션 end', 'end session']
 }
 
-// Text compared without case or spaces, so 세션종료 and "End  Session" match
-const squeezed = (text) => text.toLowerCase().replace(/\s+/g, '')
+// A phrase's words, each looked for in the text on its own
+const wordsOf = (phrase) => phrase.toLowerCase().split(/\s+/).filter(Boolean)
 
-// The phrase the text holds, or null
+// Whether the lower-cased text holds the word. One in Latin letters stands on its own, an English
+// ending allowed (end and ended, not send, weekend or endpoint); any other may sit inside a longer
+// word, so 세션을 and 종료해 hold 세션 and 종료
+function holds(text, word) {
+  if (!/^[a-z0-9]+$/.test(word)) return text.includes(word)
+  return new RegExp(`(?<![a-z0-9])${word}(?:s|ed|ing)?(?![a-z0-9])`).test(text)
+}
+
+// The phrase whose words the text all holds, in any order and with anything between, or null
 function phraseIn(text, phrases) {
-  const plain = squeezed(text)
-  return phrases.find((phrase) => plain.includes(squeezed(phrase))) ?? null
+  const plain = text.toLowerCase()
+  return phrases.find((phrase) => wordsOf(phrase).every((word) => holds(plain, word))) ?? null
 }
 
 // What the model reads beside the message that asks to end
