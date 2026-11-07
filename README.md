@@ -2,6 +2,8 @@
 
 Small [mods](https://code.claude.com/docs/en/plugins/mods/overview) for Claude Code.
 
+This is an independent personal project. It is not affiliated with, endorsed by, or sponsored by Anthropic. Claude is a trademark of Anthropic, PBC.
+
 **[English](#english)** · **[한국어](#한국어)**
 
 ---
