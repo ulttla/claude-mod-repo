@@ -1,5 +1,9 @@
 # claude-mod-repo
 
+> **Moved.** These mods now live in [ulttla/gun-marketplace](https://github.com/ulttla/gun-marketplace), under `plugins/mods/`. This repository gets no more updates. Plugins installed from it keep working; to switch, see [Moving from claude-mod-repo](https://github.com/ulttla/gun-marketplace#moving-from-claude-mod-repo).
+>
+> **이전했습니다.** 이 mod들은 이제 [ulttla/gun-marketplace](https://github.com/ulttla/gun-marketplace)의 `plugins/mods/`에 있습니다. 이 리포는 더 이상 업데이트되지 않습니다. 여기서 설치한 플러그인은 계속 동작합니다. 옮기는 방법은 [claude-mod-repo에서 옮기기](https://github.com/ulttla/gun-marketplace#claude-mod-repo에서-옮기기)를 보세요.
+
 Small [mods](https://code.claude.com/docs/en/plugins/mods/overview) for Claude Code.
 
 This is an independent personal project. It is not affiliated with, endorsed by, or sponsored by Anthropic. Claude is a trademark of Anthropic, PBC.
