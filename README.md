@@ -1,8 +1,8 @@
 # claude-mod-repo
 
-> **Moved.** These mods now live in [ulttla/gun-marketplace](https://github.com/ulttla/gun-marketplace), under `plugins/mods/`. This repository gets no more updates. Plugins installed from it keep working; to switch, see [Moving from claude-mod-repo](https://github.com/ulttla/gun-marketplace#moving-from-claude-mod-repo).
+> **Moved.** These mods now live in [gunkr-com/gun-marketplace](https://github.com/gunkr-com/gun-marketplace), under `plugins/mods/`. This repository gets no more updates. Plugins installed from it keep working; to switch, see [Moving from claude-mod-repo](https://github.com/gunkr-com/gun-marketplace#moving-from-claude-mod-repo).
 >
-> **이전했습니다.** 이 mod들은 이제 [ulttla/gun-marketplace](https://github.com/ulttla/gun-marketplace)의 `plugins/mods/`에 있습니다. 이 리포는 더 이상 업데이트되지 않습니다. 여기서 설치한 플러그인은 계속 동작합니다. 옮기는 방법은 [claude-mod-repo에서 옮기기](https://github.com/ulttla/gun-marketplace#claude-mod-repo에서-옮기기)를 보세요.
+> **이전했습니다.** 이 mod들은 이제 [gunkr-com/gun-marketplace](https://github.com/gunkr-com/gun-marketplace)의 `plugins/mods/`에 있습니다. 이 리포는 더 이상 업데이트되지 않습니다. 여기서 설치한 플러그인은 계속 동작합니다. 옮기는 방법은 [claude-mod-repo에서 옮기기](https://github.com/gunkr-com/gun-marketplace#claude-mod-repo에서-옮기기)를 보세요.
 
 Small [mods](https://code.claude.com/docs/en/plugins/mods/overview) for Claude Code.
 
@@ -38,7 +38,7 @@ A mod is code that runs with your permissions: it can read and write your files,
 Add this repository as a marketplace, then install the mods you want:
 
 ```bash
-claude plugin marketplace add ulttla/claude-mod-repo
+claude plugin marketplace add gunkr-com/claude-mod-repo
 ```
 
 ```bash
@@ -61,7 +61,7 @@ claude plugin install context-handoff-cli@claude-mod-repo
 claude plugin install session-end-unpin@claude-mod-repo
 ```
 
-In a Claude Code session the same commands are `/plugin marketplace add ulttla/claude-mod-repo` and `/plugin install context-meter@claude-mod-repo`.
+In a Claude Code session the same commands are `/plugin marketplace add gunkr-com/claude-mod-repo` and `/plugin install context-meter@claude-mod-repo`.
 
 A mod loads the next time you start a session. In a session that is already open, run `/reload-plugins`.
 
@@ -70,7 +70,7 @@ A mod loads the next time you start a session. In a session that is already open
 Clone the repository and load a mod's folder for one terminal session:
 
 ```bash
-git clone https://github.com/ulttla/claude-mod-repo.git
+git clone https://github.com/gunkr-com/claude-mod-repo.git
 ```
 
 ```bash
@@ -301,7 +301,7 @@ mod는 사용자 권한으로 실행되는 코드입니다. 파일을 읽고 쓰
 이 리포를 마켓플레이스로 추가한 뒤 원하는 mod를 설치합니다.
 
 ```bash
-claude plugin marketplace add ulttla/claude-mod-repo
+claude plugin marketplace add gunkr-com/claude-mod-repo
 ```
 
 ```bash
@@ -324,7 +324,7 @@ claude plugin install context-handoff-cli@claude-mod-repo
 claude plugin install session-end-unpin@claude-mod-repo
 ```
 
-Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/claude-mod-repo`, `/plugin install context-meter@claude-mod-repo`로 입력합니다.
+Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add gunkr-com/claude-mod-repo`, `/plugin install context-meter@claude-mod-repo`로 입력합니다.
 
 mod는 다음에 세션을 시작할 때 로드됩니다. 이미 열려 있는 세션에서는 `/reload-plugins`를 실행합니다.
 
@@ -333,7 +333,7 @@ mod는 다음에 세션을 시작할 때 로드됩니다. 이미 열려 있는 �
 리포를 클론한 뒤 터미널 세션 하나에만 mod 폴더를 로드합니다.
 
 ```bash
-git clone https://github.com/ulttla/claude-mod-repo.git
+git clone https://github.com/gunkr-com/claude-mod-repo.git
 ```
 
 ```bash
